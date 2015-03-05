@@ -53,6 +53,12 @@ bool ReadSiftKeyTextFile(const std::string& sift_key_file,
                          std::vector<Eigen::VectorXf>* descriptor,
                          std::vector<Keypoint>* keypoint);
 
+// Outputs the SIFT features in the same format as Lowe's sift key files.
+bool WriteSiftKeyTextFile(
+    const std::string& output_sift_key_file,
+    const std::vector<Eigen::VectorXf>& descriptors,
+    const std::vector<Keypoint>& keypoints);
+
 }  // namespace theia
 
 #endif  // THEIA_IO_SIFT_TEXT_FILE_H_

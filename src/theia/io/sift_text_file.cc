@@ -105,11 +105,55 @@ bool ReadSiftKeyTextFile(const std::string& sift_key_file,
            p + 2, p + 3, p + 4, p + 5, p + 6, p + 7);
 
     Eigen::VectorXf float_descriptor = int_descriptor.cast<float>();
-    float_descriptor /= 255.0;
+    float_descriptor /= 512.0;
     descriptor->push_back(float_descriptor);
   }
 
   fclose(fp);
+  return true;
+}
+
+// Outputs the SIFT features in the same format as Lowe's sift key files.
+bool WriteSiftKeyTextFile(
+    const std::string& output_sift_key_file,
+    const std::vector<Eigen::VectorXf>& descriptors,
+    const std::vector<Keypoint>& keypoints) {
+  CHECK_EQ(descriptors.size(), keypoints.size());
+
+  std::ofstream ofs(output_sift_key_file.c_str(), std::ios::out);
+  if (!ofs.is_open()) {
+    LOG(ERROR) << "Could not write the sift key text file to "
+               << output_sift_key_file;
+    return false;
+  }
+
+  // Output number of descriptors and descriptor length.
+  const int num_descriptors = descriptors.size();
+  const int len = 128;
+  ofs << num_descriptors << " " << len << std::endl;
+
+  // Output the sift descriptors.
+  for (int i = 0; i < num_descriptors; i++) {
+    // Output the keypoint information (y, x, scale, orientation).
+    ofs << keypoints[i].y() << " " << keypoints[i].x() << " ";
+    ofs << keypoints[i].scale() << " " << keypoints[i].orientation();
+    ofs << std::endl;
+
+    // Output the descriptor.
+    const Eigen::VectorXf float_scaled_desc = descriptors[i] * 512.0;
+    const Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> int_desc =
+        float_scaled_desc.cast<uint8_t>();
+
+    ofs << " " << (int)int_desc[0];
+    for (int j = 1; j < len; j++) {
+      if(j % 20 == 0)
+        ofs << std::endl;
+      ofs << " " << (int)int_desc[j];
+    }
+    if(i + 1 < num_descriptors)
+      ofs << std::endl;
+  }
+  ofs.close();
   return true;
 }
 
