@@ -35,6 +35,9 @@
 #ifndef THEIA_SFM_RECONSTRUCTION_H_
 #define THEIA_SFM_RECONSTRUCTION_H_
 
+#include <cereal/access.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/unordered_map.hpp>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -99,8 +102,29 @@ class Reconstruction {
   // Return all TrackIds in the reconstruction.
   std::vector<TrackId> TrackIds() const;
 
+  // Normalizes the reconstruction such that the "center" of the reconstruction
+  // is moved to the origin and the reconstruction is scaled such that the
+  // median distance of 3D points from the origin is 100.0. This does not affect
+  // the reprojection error. A rotation is applied such that the x-z plane is
+  // set to the dominating plane of the cameras.
+  //
+  // NOTE: This implementation is inspired by the BAL problem normalization in
+  // Ceres Solver.
+  void Normalize();
 
  private:
+  // Templated method for disk I/O with cereal. This method tells cereal which
+  // data members should be used when reading/writing to/from disk.
+  friend class cereal::access;
+  template <class Archive>
+  void serialize(Archive& ar) {  // NOLINT
+    ar(next_track_id_,
+       next_view_id_,
+       view_name_to_id_,
+       views_,
+       tracks_);
+  }
+
   TrackId next_track_id_;
   ViewId next_view_id_;
 

@@ -53,8 +53,18 @@ bool GetFilenameFromFilepath(const std::string& filepath,
                              const bool with_extension,
                              std::string* filename);
 
+// Returns the directory part of a given filepath.
+bool GetDirectoryFromFilepath(const std::string& filepath,
+                              std::string* directory);
+
 // Returns true if the file exists, false otherwise.
 bool FileExists(const std::string& filename);
+
+// Returns true if the directory exists, false otherwise.
+bool DirectoryExists(const std::string& directory);
+
+// Creates the given directory.
+bool CreateDirectory(const std::string& directory);
 
 }  // namespace theia
 

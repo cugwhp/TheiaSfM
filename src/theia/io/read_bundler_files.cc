@@ -50,6 +50,8 @@
 #include "theia/sfm/track.h"
 #include "theia/sfm/types.h"
 #include "theia/sfm/view.h"
+#include "theia/util/filesystem.h"
+#include "theia/util/map_util.h"
 
 namespace theia {
 
@@ -87,14 +89,14 @@ bool ReadListsFile(const std::string& list_filename,
   const char space = static_cast<char>(' ');
   while (!ifs.eof()) {
     // Read in the filename.
-    std::string filename;
+    std::string filename, truncated_filename;
     ifs >> filename;
     if (filename.length() == 0) {
       break;
     }
-
-    const ViewId view_id = reconstruction->AddView(filename);
-    CHECK_NE(view_id, kInvalidViewId) << "View " << filename
+    CHECK(theia::GetFilenameFromFilepath(filename, true, &truncated_filename));
+    const ViewId view_id = reconstruction->AddView(truncated_filename);
+    CHECK_NE(view_id, kInvalidViewId) << "View " << truncated_filename
                                       << " could not be added.";
 
     // Check to see if the exif focal length is given.
@@ -177,11 +179,16 @@ bool ReadBundlerFiles(const std::string& lists_file,
     return false;
   }
 
+  const Eigen::Matrix3d bundler_to_theia =
+      Eigen::Vector3d(1.0, -1.0, -1.0).asDiagonal();
+
   std::string header_string;
-  // There is one line of filler, so skip that line!
   std::getline(ifs, header_string);
 
-  std::getline(ifs, header_string);
+  // If the first line starts with '#' then it is a comment, so skip it!
+  if (header_string[0] == '#') {
+    std::getline(ifs, header_string);
+  }
   const char* p = header_string.c_str();
   char* p2;
   const int num_cameras = strtol(p, &p2, 10);
@@ -193,6 +200,7 @@ bool ReadBundlerFiles(const std::string& lists_file,
   const int num_points = strtol(p, &p2, 10);
 
   // Read in the camera params.
+  std::unordered_set<ViewId> views_to_remove;
   for (int i = 0; i < num_cameras; i++) {
     reconstruction->MutableView(i)->SetEstimated(true);
     Camera* camera = reconstruction->MutableView(i)->MutableCamera();
@@ -236,14 +244,16 @@ bool ReadBundlerFiles(const std::string& lists_file,
       p = p2;
     }
 
-    rotation.row(1) *= -1.0;
-    rotation.row(2) *= -1.0;
-    translation(1) *= -1.0;
-    translation(2) *= -1.0;
+    rotation = bundler_to_theia * rotation;
+    translation = bundler_to_theia * translation;
 
     const Eigen::Vector3d position = -rotation.transpose() * translation;
     camera->SetPosition(position);
     camera->SetOrientationFromRotationMatrix(rotation);
+
+    if (camera->FocalLength() == 0) {
+      views_to_remove.insert(i);
+    }
 
     if ((i + 1) % 100 == 0 || i == num_cameras - 1) {
       std::cout << "\r Loading parameters for camera " << i + 1 << " / "
@@ -299,8 +309,15 @@ bool ReadBundlerFiles(const std::string& lists_file,
       // coordinate system in images.
       const Feature feature(x_pos, -y_pos);
 
-      // Push the sift key correspondence to the view list.
-      track.emplace_back(camera_index, feature);
+      // Push the sift key correspondence to the view list if the view is valid.
+      if (!ContainsKey(views_to_remove, camera_index)) {
+        track.emplace_back(camera_index, feature);
+      }
+    }
+
+    // Do not add the track if it is underconstrained.
+    if (track.size() < 2) {
+      continue;
     }
 
     const TrackId track_id = reconstruction->AddTrack(track);
@@ -315,6 +332,12 @@ bool ReadBundlerFiles(const std::string& lists_file,
                 << std::flush;
     }
   }
+
+  // Remove any invalid views.
+  for (const ViewId view_to_remove : views_to_remove) {
+    reconstruction->RemoveView(view_to_remove);
+  }
+
   std::cout << std::endl;
   ifs.close();
 

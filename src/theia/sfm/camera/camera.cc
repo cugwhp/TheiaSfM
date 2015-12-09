@@ -63,8 +63,8 @@ Camera::Camera() {
   SetPrincipalPoint(0.0, 0.0);
   SetRadialDistortion(0.0, 0.0);
 
-  image_size_[0] = 1;
-  image_size_[1] = 1;
+  image_size_[0] = 0;
+  image_size_[1] = 0;
 }
 
 bool Camera::InitializeFromProjectionMatrix(
@@ -158,9 +158,9 @@ Vector3d Camera::GetPosition() const {
 }
 
 void Camera::SetOrientationFromRotationMatrix(const Matrix3d& rotation) {
-  const AngleAxisd rotation_aa(rotation);
-  Map<Vector3d>(mutable_extrinsics() + ORIENTATION) =
-      rotation_aa.angle() * rotation_aa.axis();
+  ceres::RotationMatrixToAngleAxis(
+      ceres::ColumnMajorAdapter3x3(rotation.data()),
+      mutable_extrinsics() + ORIENTATION);
 }
 
 void Camera::SetOrientationFromAngleAxis(const Vector3d& angle_axis) {

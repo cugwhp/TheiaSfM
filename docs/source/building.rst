@@ -5,7 +5,7 @@ Building Theia Library
 ======================
 
 Theia source code and documentation are hosted on `Github
-<https://github.com/kip622/Theia>`_ where you can always grab the latest version
+<https://github.com/sweeneychris/TheiaSfM>`_ where you can always grab the latest version
 
 .. _section-dependencies:
 
@@ -43,9 +43,10 @@ Building
 
 Building should be equivalent on all platforms, thanks to CMake. To install Theia, simply run the following commands after you have installed the :ref:`section-dependencies`.
 
+First, navigate to the source directory of the Theia library. Then execute the following commands:
+
 .. code-block:: bash
 
- tar zxf theia-0.0.1.tar.gz
  mkdir theia-build
  cd theia-build
  cmake ..
@@ -71,9 +72,5 @@ It is possible to customize the build process by passing appropriate flags to
 
 
 #. ``-DBUILD_TESTING=OFF``: Use this flag to enable or disable building the unit tests. By default, this option is enabled.
-
-#. ``-DOPENMP=OFF``: By default, Theia uses OpenMP to multithread/parallelize certain parts of the code. Certain platforms don't play nice with this, so you can disable this option.
-
-#. ``-DBUILD_TUTORIALS=OFF``: By default, building Theia will build several tutorial programs to demonstrate some uses of the library. You can disable this option.
 
 #. ``-DBUILD_DOCUMENTATION=ON``: Turn this flag to ``ON`` to build the documentation with Theia. This option is disabled by default.

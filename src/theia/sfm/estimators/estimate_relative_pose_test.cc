@@ -46,7 +46,6 @@
 #include "theia/test/test_utils.h"
 #include "theia/sfm/create_and_initialize_ransac_variant.h"
 #include "theia/sfm/estimators/estimate_relative_pose.h"
-#include "theia/sfm/estimators/relative_pose_estimator.h"
 #include "theia/matching/feature_correspondence.h"
 #include "theia/sfm/pose/test_util.h"
 #include "theia/sfm/pose/util.h"

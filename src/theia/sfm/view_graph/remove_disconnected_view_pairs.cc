@@ -35,25 +35,24 @@
 #include "theia/sfm/view_graph/remove_disconnected_view_pairs.h"
 
 #include <glog/logging.h>
-#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "theia/math/graph/connected_components.h"
-#include "theia/util/hash.h"
-#include "theia/sfm/twoview_info.h"
 #include "theia/sfm/types.h"
+#include "theia/sfm/view_graph/view_graph.h"
 
 namespace theia {
 
 // Removes all view pairs that are not part of the largest connected component.
-void RemoveDisconnectedViewPairs(
-    std::unordered_map<ViewIdPair, TwoViewInfo>* view_pairs) {
-  CHECK_NOTNULL(view_pairs);
+std::unordered_set<ViewId> RemoveDisconnectedViewPairs(ViewGraph* view_graph) {
+  CHECK_NOTNULL(view_graph);
+  std::unordered_set<ViewId> removed_views;
 
   // Extract all connected components.
   ConnectedComponents<ViewId> cc_extractor;
-  for (const auto& view_pair : *view_pairs) {
+  const auto& view_pairs = view_graph->GetAllEdges();
+  for (const auto& view_pair : view_pairs) {
     cc_extractor.AddEdge(view_pair.first.first, view_pair.first.second);
   }
   std::unordered_map<ViewId, std::unordered_set<ViewId> > connected_components;
@@ -69,28 +68,30 @@ void RemoveDisconnectedViewPairs(
     }
   }
 
-  // Remove all view pairs not in the largest connected component.
-  const int num_view_pairs_before_filtering = view_pairs->size();
+  // Remove all view pairs containing a view to remove (i.e. the ones that are
+  // not in the largest connectedcomponent).
+  const int num_view_pairs_before_filtering = view_graph->NumEdges();
   for (const auto& connected_component : connected_components) {
     if (connected_component.first == largest_cc_root_id) {
       continue;
     }
-    const ViewId view_id1 = connected_component.first;
 
+    // NOTE: The connected component will contain the root id as well, so we do
+    // not explicity have to remove connected_component.first since it will
+    // exist in connected_components.second
     for (const ViewId view_id2 : connected_component.second) {
-      const ViewIdPair view_id_pair = (view_id1 < view_id2)
-                                          ? ViewIdPair(view_id1, view_id2)
-                                          : ViewIdPair(view_id2, view_id1);
-      view_pairs->erase(view_id_pair);
+      view_graph->RemoveView(view_id2);
+      removed_views.insert(view_id2);
     }
   }
 
   const int num_removed_view_pairs =
-      num_view_pairs_before_filtering - view_pairs->size();
+      num_view_pairs_before_filtering - view_graph->NumEdges();
   LOG_IF(INFO, num_removed_view_pairs > 0)
       << num_removed_view_pairs
       << " view pairs were disconnected from the largest connected component "
          "of the view graph and were removed.";
+  return removed_views;
 }
 
 }  // namespace theia

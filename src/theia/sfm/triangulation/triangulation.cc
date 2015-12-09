@@ -35,13 +35,15 @@
 #include "theia/sfm/triangulation/triangulation.h"
 
 #include <Eigen/Core>
-#include <Eigen/Geometry>
-#include <Eigen/SVD>
 #include <Eigen/Eigenvalues>
+#include <Eigen/Geometry>
+#include <Eigen/QR>
+#include <Eigen/SVD>
 #include <glog/logging.h>
 #include <vector>
 
 #include "theia/matching/feature_correspondence.h"
+#include "theia/math/util.h"
 #include "theia/sfm/pose/fundamental_matrix_util.h"
 #include "theia/sfm/pose/util.h"
 
@@ -129,34 +131,35 @@ bool Triangulate(const Matrix3x4d& pose1,
 // Triangulates a 3D point by determining the closest point between the two
 // rays. This method is known to be suboptimal in terms of reprojection error
 // but it is extremely fast.
-bool TriangulateMidpoint(const Vector3d& ray_origin1,
-                         const Vector3d& ray_direction1,
-                         const Vector3d& ray_origin2,
-                         const Vector3d& ray_direction2,
+bool TriangulateMidpoint(const std::vector<Vector3d>& ray_origin,
+                         const std::vector<Vector3d>& ray_direction,
                          Eigen::Vector4d* triangulated_point) {
-  const double dir1_dot_dir2 = ray_direction1.dot(ray_direction2);
-  const double dir1_dot_pos = ray_direction1.dot(ray_origin2 - ray_origin1);
-  const double dir2_dot_pos = ray_direction2.dot(ray_origin2 - ray_origin1);
-  const double scale_part =  1.0 - dir1_dot_dir2 * dir1_dot_dir2;
+  CHECK_NOTNULL(triangulated_point);
+  CHECK_GE(ray_origin.size(), 2);
+  CHECK_EQ(ray_origin.size(), ray_direction.size());
 
-  const Vector3d scaled_dir1 =
-      (dir1_dot_pos - dir1_dot_dir2 * dir2_dot_pos) * ray_direction1;
-  const Vector3d scaled_dir2 =
-      (dir1_dot_pos * dir1_dot_dir2 - dir2_dot_pos) * ray_direction2;
-
-  // The point is at infinity if the scale division == 0.
-  if (scale_part == 0) {
-    triangulated_point->head<3>() =
-        (ray_origin1 + scaled_dir1 + ray_origin2 + scaled_dir2) / 2.0;
-    (*triangulated_point)[3] = 0;
-    return true;
+  Eigen::Matrix4d A;
+  A.setZero();
+  Eigen::Vector4d b;
+  b.setZero();
+  for (int i = 0; i < ray_origin.size(); i++) {
+    const Eigen::Vector4d ray_direction_homog(ray_direction[i].x(),
+                                              ray_direction[i].y(),
+                                              ray_direction[i].z(),
+                                              0);
+    const Eigen::Matrix4d A_term =
+        Eigen::Matrix4d::Identity() -
+        ray_direction_homog * ray_direction_homog.transpose();
+    A += A_term;
+    b += A_term * ray_origin[i].homogeneous();
   }
 
-  triangulated_point->head<3>() =
-      (ray_origin1 + scaled_dir1 / scale_part +
-       ray_origin2 + scaled_dir2 / scale_part) / 2.0;
-  (*triangulated_point)[3] = 1;
-  return true;
+  Eigen::ColPivHouseholderQR<Eigen::Matrix4d> qr(A);
+  if (qr.info() != Eigen::Success) {
+    return false;
+  }
+  *triangulated_point = qr.solve(b);
+  return qr.info() == Eigen::Success;
 }
 
 // Triangulates 2 posed views
@@ -213,7 +216,7 @@ bool TriangulateNView(const std::vector<Matrix3x4d>& poses,
 
   Eigen::SelfAdjointEigenSolver<Matrix4d> eigen_solver(design_matrix);
   *triangulated_point = eigen_solver.eigenvectors().col(0);
-  return true;
+  return eigen_solver.info() == Eigen::Success;
 }
 
 bool IsTriangulatedPointInFrontOfCameras(
@@ -232,6 +235,25 @@ bool IsTriangulatedPointInFrontOfCameras(
 
   return (dir2_sq * dir1_pos - dir1_dir2 * dir2_pos > 0 &&
           dir1_dir2 * dir1_pos - dir1_sq * dir2_pos > 0);
+}
+
+
+// Returns true if the triangulation angle between any two observations is
+// sufficient.
+bool SufficientTriangulationAngle(
+    const std::vector<Eigen::Vector3d>& ray_directions,
+    const double min_triangulation_angle_degrees) {
+  // Test that the angle between the rays is sufficient.
+  const double cos_of_min_angle =
+      cos(DegToRad(min_triangulation_angle_degrees));
+  for (int i = 0; i < ray_directions.size(); i++) {
+    for (int j = i + 1; j < ray_directions.size(); j++) {
+      if (ray_directions[i].dot(ray_directions[j]) < cos_of_min_angle) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 }  // namespace theia

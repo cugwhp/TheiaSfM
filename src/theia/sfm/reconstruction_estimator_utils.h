@@ -42,7 +42,7 @@
 #include "theia/sfm/bundle_adjustment/bundle_adjustment.h"
 #include "theia/sfm/reconstruction.h"
 #include "theia/sfm/reconstruction_estimator.h"
-#include "theia/sfm/pose/estimate_positions_nonlinear.h"
+#include "theia/sfm/global_pose_estimation/nonlinear_position_estimator.h"
 #include "theia/sfm/twoview_info.h"
 #include "theia/sfm/view_graph/view_graph.h"
 
@@ -58,28 +58,21 @@ BundleAdjustmentOptions SetBundleAdjustmentOptions(
 RansacParameters SetRansacParameters(
     const ReconstructionEstimatorOptions& options);
 
-// Initializes the focal length of each view. If EXIF data is available then the
-// focal length is set using the EXIF value, otherwise it is set to
-// 1.2 * max(image_width, image_height). This value is shown to be a decent
-// initialization in the VisualSfM software.
-void InitializeFocalLengthsFromImageSize(Reconstruction* reconstruction);
-
-// Initializes focal length from the median focal length among all edges in the
-// view graph.
-void InitializeFocalLengthsFromMedian(const ViewGraph& view_graph,
-                                      Reconstruction* reconstruction);
-
 // Collects the relative rotations for each view pair into a simple map.
-std::unordered_map<ViewIdPair, Eigen::Vector3d>
-    RelativeRotationsFromTwoViewInfos(
-        const std::unordered_map<ViewIdPair, TwoViewInfo>& view_pairs);
-
+std::unordered_map<ViewIdPair, Eigen::Vector3d> RelativeRotationsFromViewGraph(
+    const ViewGraph& view_graph);
 
 // Each view that has a rotation and position estimated has the Camera pose set.
 void SetReconstructionFromEstimatedPoses(
     const std::unordered_map<ViewId, Eigen::Vector3d>& orientations,
     const std::unordered_map<ViewId, Eigen::Vector3d>& positions,
     Reconstruction* reconstruction);
+
+// Given a reconstruction, return a new reconstruction that contains only the
+// estimated views and tracks.
+void CreateEstimatedSubreconstruction(
+    const Reconstruction& input_reconstruction,
+    Reconstruction* estimated_reconstruction);
 
 // Outputs the ViewId of all estimated views in the reconstruction.
 void GetEstimatedViewsFromReconstruction(const Reconstruction& reconstruction,
@@ -94,11 +87,20 @@ void GetEstimatedTracksFromReconstruction(const Reconstruction& reconstruction,
 void RefineRelativeTranslationsWithKnownRotations(
     const Reconstruction& reconstruction,
     const std::unordered_map<ViewId, Eigen::Vector3d>& orientations,
-    std::unordered_map<ViewIdPair, TwoViewInfo>* view_pairs);
+    const int num_threads,
+    ViewGraph* view_graph);
 
-// Removes all features that have a reprojection error larger than the
-// reprojection error threshold. Returns the number of features removed.
+// Removes features that have a reprojection error larger than the
+// reprojection error threshold. Additionally, any features that are poorly
+// constrained because of a small viewing angle are removed. Returns the number
+// of features removed. Only the input tracks are checked.
+int RemoveOutlierFeatures(const std::unordered_set<TrackId>& tracks,
+                          const double max_inlier_reprojection_error,
+                          const double min_triangulation_angle_degrees,
+                          Reconstruction* reconstruction);
+// Same as above, but checks all tracks.
 int RemoveOutlierFeatures(const double max_inlier_reprojection_error,
+                          const double min_triangulation_angle_degrees,
                           Reconstruction* reconstruction);
 
 // Sets all tracks that are not seen by enough estimated views to unestimated.
@@ -108,6 +110,10 @@ int SetUnderconstrainedTracksToUnestimated(Reconstruction* reconstruction);
 // Sets all vies that are not seen by enough estimated tracks to unestimated.
 // Returns the number of views set to unestimated.
 int SetUnderconstrainedViewsToUnestimated(Reconstruction* reconstruction);
+
+// Return the number of estimated views or tracks in the reconstruction.
+int NumEstimatedViews(const Reconstruction& reconstruction);
+int NumEstimatedTracks(const Reconstruction& reconstruction);
 
 }  // namespace theia
 

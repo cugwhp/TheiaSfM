@@ -38,7 +38,7 @@
 #include <vector>
 
 #include "theia/matching/feature_correspondence.h"
-#include "theia/sfm/camera/camera_intrinsics.h"
+#include "theia/sfm/camera_intrinsics_prior.h"
 #include "theia/sfm/estimate_twoview_info.h"
 #include "theia/sfm/twoview_info.h"
 
@@ -53,12 +53,21 @@ struct VerifyTwoViewMatchesOptions {
 
   // Bundle adjust the two view geometry using inliers.
   bool bundle_adjustment = true;
+
+  // If performing bundle adjustment, the 3D points are only considered inliers
+  // if the initial triangulation error is less than this. This value is in
+  // pixels.
+  double triangulation_sq_max_reprojection_error = 15.0;
+  // If performing bundle adjustment, the 3D points are only considered inliers
+  // if the reprojection error after bundle adjustment is less than this. This
+  // value is in pixels.
+  double final_sq_max_reprojection_error = 5.0;
 };
 
 bool VerifyTwoViewMatches(
     const VerifyTwoViewMatchesOptions& options,
-    const CameraIntrinsics& intrinsics1,
-    const CameraIntrinsics& intrinsics2,
+    const CameraIntrinsicsPrior& intrinsics1,
+    const CameraIntrinsicsPrior& intrinsics2,
     const std::vector<FeatureCorrespondence>& correspondences,
     TwoViewInfo* twoview_info,
     std::vector<int>* inlier_indices);

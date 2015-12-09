@@ -62,11 +62,10 @@ class ViewGraph {
 
   bool HasView(const ViewId view_id) const;
 
+  bool HasEdge(const ViewId view_id_1, const ViewId view_id_2) const;
+
   // Returns a set of the ViewIds contained in the view graph.
   std::unordered_set<ViewId> ViewIds() const;
-
-  // Adds the view to the view graph if it is not already present.
-  void AddView(const ViewId view_id);
 
   // Removes the view from the view graph and removes all edges connected to the
   // view. Returns true on success and false if the view did not exist in the
@@ -84,25 +83,28 @@ class ViewGraph {
   // and false if the edge did not exist.
   bool RemoveEdge(const ViewId view_id_1, const ViewId view_id_2);
 
-  // Returns all the edges for a given view id or NULL if the view is not in the
-  // view graph.
-  const std::unordered_map<ViewId, TwoViewInfo>* GetEdgesForView(
+  // Returns the neighbor view ids for a given view, or nullptr if the view does
+  // not exist.
+  const std::unordered_set<ViewId>* GetNeighborIdsForView(
       const ViewId view_id) const;
 
   // Returns the edge value or NULL if it does not exist.
   const TwoViewInfo* GetEdge(const ViewId view_id_1,
                              const ViewId view_id_2) const;
 
+  TwoViewInfo* GetMutableEdge(const ViewId view_id_1, const ViewId view_id_2);
+
   // Returns a map of all edges. Each edge is found exactly once in the map and
   // is indexed by the ViewIdPair (view id 1, view id 2) such that view id 1 <
   // view id 2.
-  std::unordered_map<ViewIdPair, TwoViewInfo> GetAllEdges() const;
+  const std::unordered_map<ViewIdPair, TwoViewInfo>& GetAllEdges() const;
 
  private:
   // The underlying adjacency map. ViewIds are the vertices which are mapped to
-  // a set of edges.
-  std::unordered_map<ViewId, std::unordered_map<ViewId, TwoViewInfo> >
-      vertices_;
+  // a collection of its neighbors and the edges themselves are stored
+  // separately.
+  std::unordered_map<ViewId, std::unordered_set<ViewId> > vertices_;
+  std::unordered_map<ViewIdPair, TwoViewInfo> edges_;
 };
 
 }  // namespace theia

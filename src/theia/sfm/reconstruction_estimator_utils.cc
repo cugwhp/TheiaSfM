@@ -42,17 +42,19 @@
 #include <unordered_map>
 #include <vector>
 
-#include "theia/solvers/sample_consensus_estimator.h"
-#include "theia/util/map_util.h"
+#include "theia/matching/feature_correspondence.h"
 #include "theia/sfm/bundle_adjustment/bundle_adjustment.h"
 #include "theia/sfm/bundle_adjustment/optimize_relative_position_with_known_rotation.h"
 #include "theia/sfm/camera/reprojection_error.h"
-#include "theia/matching/feature_correspondence.h"
+#include "theia/sfm/global_pose_estimation/nonlinear_position_estimator.h"
 #include "theia/sfm/reconstruction.h"
 #include "theia/sfm/reconstruction_estimator.h"
-#include "theia/sfm/pose/estimate_positions_nonlinear.h"
+#include "theia/sfm/triangulation/triangulation.h"
 #include "theia/sfm/twoview_info.h"
 #include "theia/sfm/view_graph/view_graph.h"
+#include "theia/solvers/sample_consensus_estimator.h"
+#include "theia/util/map_util.h"
+#include "theia/util/threadpool.h"
 
 namespace theia {
 namespace {
@@ -100,25 +102,6 @@ void GetFeatureCorrespondences(const View& view1, const View& view2,
   }
 }
 
-// Computes the relative rotation from two absolute rotations.
-Eigen::Vector3d RelativeRotationFromTwoRotations(
-    const Eigen::Vector3d& rotation1, const Eigen::Vector3d& rotation2) {
-  Eigen::Matrix3d rotation1_mat, rotation2_mat;
-  ceres::AngleAxisToRotationMatrix(
-      rotation1.data(), ceres::ColumnMajorAdapter3x3(rotation1_mat.data()));
-  ceres::AngleAxisToRotationMatrix(
-      rotation2.data(), ceres::ColumnMajorAdapter3x3(rotation2_mat.data()));
-
-  const Eigen::Matrix3d relative_rotation_mat =
-      rotation2_mat * rotation1_mat.transpose();
-  Eigen::Vector3d relative_rotation;
-  ceres::RotationMatrixToAngleAxis(
-      ceres::ColumnMajorAdapter3x3(relative_rotation_mat.data()),
-      relative_rotation.data());
-
-  return relative_rotation;
-}
-
 }  // namespace
 
 using Eigen::Vector3d;
@@ -131,7 +114,7 @@ BundleAdjustmentOptions SetBundleAdjustmentOptions(
   BundleAdjustmentOptions ba_options;
   ba_options.num_threads = options.num_threads;
   ba_options.use_inner_iterations = true;
-  ba_options.constant_camera_intrinsics = options.constant_camera_intrinsics;
+  ba_options.intrinsics_to_optimize = options.intrinsics_to_optimize;
 
   if (num_views >= options.min_cameras_for_iterative_solver) {
     ba_options.linear_solver_type = ceres::ITERATIVE_SCHUR;
@@ -158,58 +141,12 @@ RansacParameters SetRansacParameters(
   return ransac_params;
 }
 
-// Initializes the focal length of each view. If EXIF data is available then the
-// focal length is set using the EXIF value, otherwise it is set to
-// 1.2 * max(image_width, image_height). This value is shown to be a decent
-// initialization in the VisualSfM software.
-void InitializeFocalLengthsFromImageSize(Reconstruction* reconstruction) {
-  for (const ViewId view_id : reconstruction->ViewIds()) {
-    View* view = reconstruction->MutableView(view_id);
-
-    // Set it to the EXIF value if the focal length is known, otherwise set it
-    // to the estimate based on the image size.
-    if (view->CameraIntrinsicsPrior().focal_length.is_set) {
-      view->MutableCamera()->SetFocalLength(
-          view->CameraIntrinsicsPrior().focal_length.value);
-    } else {
-      view->MutableCamera()->SetFocalLength(
-          1.2 * static_cast<double>(std::max(view->Camera().ImageWidth(),
-                                             view->Camera().ImageHeight())));
-    }
-  }
-}
-
-void InitializeFocalLengthsFromMedian(const ViewGraph& view_graph,
-                                      Reconstruction* reconstruction) {
-  CHECK_GT(view_graph.NumEdges(), 0);
-  std::unordered_map<ViewId, std::vector<double> > focal_lengths;
-  focal_lengths.reserve(view_graph.NumViews());
-
-  // Collect all focal lengths.
-  const auto& edges = view_graph.GetAllEdges();
-  for (const auto& edge : edges) {
-    focal_lengths[edge.first.first].push_back(edge.second.focal_length_1);
-    focal_lengths[edge.first.second].push_back(edge.second.focal_length_2);
-  }
-
-  // For each view, find the median focal length.
-  for (auto& focal_length_vals : focal_lengths) {
-    const int median_index = focal_length_vals.second.size() / 2;
-    std::nth_element(focal_length_vals.second.begin(),
-                     focal_length_vals.second.begin() + median_index,
-                     focal_length_vals.second.end());
-    View* view =
-        CHECK_NOTNULL(reconstruction->MutableView(focal_length_vals.first));
-    view->MutableCamera()->SetFocalLength(
-        focal_length_vals.second[median_index]);
-  }
-}
-
 // Collects the relative rotations for each view pair into a simple map.
-std::unordered_map<ViewIdPair, Eigen::Vector3d>
-RelativeRotationsFromTwoViewInfos(
-    const std::unordered_map<ViewIdPair, TwoViewInfo>& view_pairs) {
+std::unordered_map<ViewIdPair, Eigen::Vector3d> RelativeRotationsFromViewGraph(
+    const ViewGraph& view_graph) {
   std::unordered_map<ViewIdPair, Eigen::Vector3d> relative_rotations;
+
+  const auto& view_pairs = view_graph.GetAllEdges();
   for (const auto& view_pair : view_pairs) {
     relative_rotations[view_pair.first] = view_pair.second.rotation_2;
   }
@@ -246,6 +183,35 @@ void SetReconstructionFromEstimatedPoses(
   }
 }
 
+void CreateEstimatedSubreconstruction(
+    const Reconstruction& input_reconstruction,
+    Reconstruction* estimated_reconstruction) {
+  *estimated_reconstruction = input_reconstruction;
+  const auto view_ids = estimated_reconstruction->ViewIds();
+  for (const ViewId view_id : view_ids) {
+    const View* view = estimated_reconstruction->View(view_id);
+    if (view == nullptr) {
+      continue;
+    }
+
+    if (!view->IsEstimated()) {
+      estimated_reconstruction->RemoveView(view_id);
+    }
+  }
+
+  const auto track_ids = estimated_reconstruction->TrackIds();
+  for (const TrackId track_id : track_ids) {
+    const Track* track = estimated_reconstruction->Track(track_id);
+    if (track == nullptr) {
+      continue;
+    }
+
+    if (!track->IsEstimated() || track->NumViews() < 2) {
+      estimated_reconstruction->RemoveTrack(track_id);
+    }
+  }
+}
+
 // Outputs the ViewId of all estimated views in the reconstruction.
 void GetEstimatedViewsFromReconstruction(const Reconstruction& reconstruction,
                                          std::unordered_set<ViewId>* views) {
@@ -274,65 +240,108 @@ void GetEstimatedTracksFromReconstruction(const Reconstruction& reconstruction,
 void RefineRelativeTranslationsWithKnownRotations(
     const Reconstruction& reconstruction,
     const std::unordered_map<ViewId, Eigen::Vector3d>& orientations,
-    std::unordered_map<ViewIdPair, TwoViewInfo>* view_pairs) {
+    const int num_threads,
+    ViewGraph* view_graph) {
+  CHECK_GE(num_threads, 1);
+  const auto& view_pairs = view_graph->GetAllEdges();
+
+  ThreadPool pool(num_threads);
   // Refine the translation estimation for each view pair.
-  for (auto& view_pair : *view_pairs) {
+  for (const auto& view_pair : view_pairs) {
     // Get all feature correspondences common to both views.
     std::vector<FeatureCorrespondence> matches;
     const View* view1 = reconstruction.View(view_pair.first.first);
     const View* view2 = reconstruction.View(view_pair.first.second);
     GetFeatureCorrespondences(*view1, *view2, &matches);
 
-    const Eigen::Vector3d relative_rotation = RelativeRotationFromTwoRotations(
-        FindOrDie(orientations, view_pair.first.first),
-        FindOrDie(orientations, view_pair.first.second));
-
-    CHECK(OptimizeRelativePositionWithKnownRotation(
-        matches, relative_rotation, &view_pair.second.position_2))
-        << "Could not optimize the relative translation from the epipolar "
-           "constraint.";
+    TwoViewInfo* info = view_graph->GetMutableEdge(view_pair.first.first,
+                                                   view_pair.first.second);
+    pool.Add(OptimizeRelativePositionWithKnownRotation,
+             matches,
+             FindOrDie(orientations, view_pair.first.first),
+             FindOrDie(orientations, view_pair.first.second),
+             &info->position_2);
   }
 }
 
 int RemoveOutlierFeatures(const double max_inlier_reprojection_error,
-                           Reconstruction* reconstruction) {
+                          const double min_triangulation_angle_degrees,
+                          Reconstruction* reconstruction) {
+  const auto& track_ids = reconstruction->TrackIds();
+  const std::unordered_set<TrackId> all_tracks(track_ids.begin(),
+                                               track_ids.end());
+  return RemoveOutlierFeatures(all_tracks,
+                               max_inlier_reprojection_error,
+                               min_triangulation_angle_degrees,
+                               reconstruction);
+}
+
+int RemoveOutlierFeatures(const std::unordered_set<TrackId>& track_ids,
+                          const double max_inlier_reprojection_error,
+                          const double min_triangulation_angle_degrees,
+                          Reconstruction* reconstruction) {
   const double max_sq_reprojection_error =
       max_inlier_reprojection_error * max_inlier_reprojection_error;
-  int num_features_removed = 0;
-  int num_features = 0;
-  // Compute reprojection error and remove all outlier features.
-  for (const ViewId view_id : reconstruction->ViewIds()) {
-    View* view = CHECK_NOTNULL(reconstruction->MutableView(view_id));
-    if (!view->IsEstimated()) {
+
+  int num_estimated_tracks = 0;
+  int num_bad_reprojections = 0;
+  int num_insufficient_viewing_angles = 0;
+
+  for (const TrackId track_id : track_ids) {
+    Track* track = reconstruction->MutableTrack(track_id);
+    if (!track->IsEstimated()) {
       continue;
     }
-    const Camera& camera = view->Camera();
+    ++num_estimated_tracks;
 
-    // Check the reprojection error of every track observed by the view.
-    for (const TrackId track_id : view->TrackIds()) {
-      Track* track = CHECK_NOTNULL(reconstruction->MutableTrack(track_id));
-      const Feature* feature =
-          reconstruction->View(view_id)->GetFeature(track_id);
-      if (!track->IsEstimated()) {
+    std::vector<Eigen::Vector3d> ray_directions;
+    const auto& view_ids = track->ViewIds();
+    for (const ViewId view_id : view_ids) {
+      const View* view = CHECK_NOTNULL(reconstruction->View(view_id));
+      if (!view->IsEstimated()) {
         continue;
       }
 
-      ++num_features;
+      const Camera& camera = view->Camera();
+      const Eigen::Vector3d ray_direction =
+          track->Point().hnormalized() - camera.GetPosition();
+      ray_directions.push_back(ray_direction.normalized());
+
+      // Check the reprojection error.
+      const Feature* feature = view->GetFeature(track_id);
       // Reproject the observations.
       Eigen::Vector2d projection;
       const double depth = camera.ProjectPoint(track->Point(), &projection);
       // Remove the feature if the reprojection error is too large or is behind
       // the camera.
-      if (depth < 0 ||
-          (projection - *feature).squaredNorm() > max_sq_reprojection_error) {
-        view->RemoveFeature(track_id);
-        track->RemoveView(view_id);
-        ++num_features_removed;
+      const double sq_reprojection_error =
+          (projection - *feature).squaredNorm();
+      if (depth < 0 || sq_reprojection_error > max_sq_reprojection_error) {
+        ++num_bad_reprojections;
+        track->SetEstimated(false);
+        break;
       }
     }
+
+    // The track will remain estimated if the reprojection errors were all
+    // good. We then test that the track is properly constrained by having at
+    // least two cameras view it with a sufficient viewing angle.
+    if (track->IsEstimated() &&
+        !SufficientTriangulationAngle(ray_directions,
+                                      min_triangulation_angle_degrees)) {
+      ++num_insufficient_viewing_angles;
+      track->SetEstimated(false);
+    }
   }
-  LOG(INFO) << "Num features = " << num_features;
-  return num_features_removed;
+
+  LOG_IF(INFO, num_bad_reprojections > 0 || num_insufficient_viewing_angles > 0)
+      << num_bad_reprojections
+      << " points were removed because of bad reprojection errors. "
+      << num_insufficient_viewing_angles
+      << " points were removed because they had insufficient viewing angles "
+         "and were poorly constrained.";
+
+  return num_bad_reprojections + num_insufficient_viewing_angles;
 }
 
 int SetUnderconstrainedTracksToUnestimated(Reconstruction* reconstruction) {
@@ -394,6 +403,30 @@ int SetUnderconstrainedViewsToUnestimated(Reconstruction* reconstruction) {
   }
 
   return num_underconstrained_views;
+}
+
+int NumEstimatedViews(const Reconstruction& reconstruction) {
+  int num_estimated_views = 0;
+  for (const ViewId view_id : reconstruction.ViewIds()) {
+    const View* view = reconstruction.View(view_id);
+    if (view == nullptr || !view->IsEstimated()) {
+      continue;
+    }
+    ++num_estimated_views;
+  }
+  return num_estimated_views;
+}
+
+int NumEstimatedTracks(const Reconstruction& reconstruction) {
+  int num_estimated_tracks = 0;
+  for (const TrackId track_id : reconstruction.TrackIds()) {
+    const Track* track = reconstruction.Track(track_id);
+    if (track == nullptr || !track->IsEstimated()) {
+      continue;
+    }
+    ++num_estimated_tracks;
+  }
+  return num_estimated_tracks;
 }
 
 }  // namespace theia

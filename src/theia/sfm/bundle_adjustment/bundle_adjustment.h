@@ -36,10 +36,33 @@
 #define THEIA_SFM_BUNDLE_ADJUSTMENT_BUNDLE_ADJUSTMENT_H_
 
 #include <ceres/ceres.h>
+#include <unordered_set>
+#include "theia/sfm/types.h"
 
 namespace theia {
 
 class Reconstruction;
+
+// The camera intrinsics parameters are defined by:
+//   - Focal length
+//   - Principal points (x and y)
+//   - Radial distortion (2-parameter model)
+//   - Skew
+//   - Aspect ratio
+// It is often known for instance that skew is 0 and aspect ratio is 1, and so
+// we do not always desire to optimize all camera intrinsics. In many cases, the
+// focal length is the only parameter we care to optimize.
+//
+// When NONE is selected, all intrinsic parameters are held constant. Otherwise,
+// only the indicated parameters are optimized.
+enum class OptimizeIntrinsicsType {
+  NONE = 0,
+  ALL = 1,
+  FOCAL_LENGTH = 2,
+  FOCAL_LENGTH_AND_PRINCIPAL_POINTS = 3,
+  FOCAL_LENGTH_AND_RADIAL_DISTORTION = 4,
+  FOCAL_LENGTH_PRINCIPAL_POINTS_AND_RADIAL_DISTORTION = 5,
+};
 
 struct BundleAdjustmentOptions {
   // For larger problems (> 1000 cameras) it is recommended to use the
@@ -47,14 +70,16 @@ struct BundleAdjustmentOptions {
   ceres::LinearSolverType linear_solver_type = ceres::SPARSE_SCHUR;
   ceres::PreconditionerType preconditioner_type = ceres::SCHUR_JACOBI;
   ceres::VisibilityClusteringType visibility_clustering_type =
-      ceres::SINGLE_LINKAGE;
+      ceres::CANONICAL_VIEWS;
 
   // If true, ceres will log verbosely.
   bool verbose = false;
 
-  // If set to true, the camera intrinsics are held constant. This is useful if
-  // the calibration is precisely known ahead of time.
-  bool constant_camera_intrinsics = false;
+  // Indicates which intrinsics should be optimized as part of bundle
+  // adjustment. By default, we do not optimize skew and aspect ratio since
+  // these are almost universally constant.
+  OptimizeIntrinsicsType intrinsics_to_optimize = OptimizeIntrinsicsType::
+      FOCAL_LENGTH_PRINCIPAL_POINTS_AND_RADIAL_DISTORTION;
 
   int num_threads = 1;
   int max_num_iterations = 500;
@@ -87,6 +112,23 @@ struct BundleAdjustmentSummary {
 // Bundle adjust all views and tracks in the reconstruction.
 BundleAdjustmentSummary BundleAdjustReconstruction(
     const BundleAdjustmentOptions& options, Reconstruction* reconstruction);
+
+// Bundle adjust the specified views and all tracks observed by those views.
+BundleAdjustmentSummary BundleAdjustPartialReconstruction(
+    const BundleAdjustmentOptions& options,
+    const std::unordered_set<ViewId>& views_to_optimize,
+    const std::unordered_set<TrackId>& tracks_to_optimize,
+    Reconstruction* reconstruction);
+
+// Bundle adjust a single view.
+BundleAdjustmentSummary BundleAdjustView(const BundleAdjustmentOptions& options,
+                                         const ViewId view_id,
+                                         Reconstruction* reconstruction);
+
+// Bundle adjust a single track.
+BundleAdjustmentSummary BundleAdjustTrack(const BundleAdjustmentOptions& options,
+                                          const TrackId track_id,
+                                          Reconstruction* reconstruction);
 
 }  // namespace theia
 

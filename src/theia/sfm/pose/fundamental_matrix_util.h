@@ -38,8 +38,7 @@
 namespace theia {
 
 // Given a fundmental matrix, decompose the fundmental matrix and recover focal
-// lengths f1, f2 >0 such that diag([f2 f2 1]) F diag[f1 f1 1]) is a valid
-// essential matrix. This assumes a principal point of (0, 0) for both cameras.
+// lengths f1, f2 >0. This assumes a principal point of (0, 0) for both cameras.
 //
 // Returns true on success, false otherwise.
 bool FocalLengthsFromFundamentalMatrix(const double fmatrix[3 * 3],
@@ -60,6 +59,23 @@ void ProjectionMatricesFromFundamentalMatrix(const double fmatrix[3 * 3],
 void FundamentalMatrixFromProjectionMatrices(const double pmatrix1[3 * 4],
                                              const double pmatrix2[3 * 4],
                                              double fmatrix[3 * 3]);
+
+// Extracts the essential matrix such that diag([f2 f2 1]) F diag[f1 f1 1]) is a
+// valid essential matrix.
+void EssentialMatrixFromFundamentalMatrix(const double fmatrix[3 * 3],
+                                          const double focal_length1,
+                                          const double focal_length2,
+                                          double ematrix[3 * 3]);
+
+// Composes a fundamental matrix such that:
+//    F = K_2^-1 * [t]_x * R * K_2^-1
+// where K_i is the calibration matrix for image i. The fundamental matrix F is
+// thus the matrix that transfers points from image 1 to lines in image 2.
+void ComposeFundamentalMatrix(const double focal_length1,
+                              const double focal_length2,
+                              const double rotation[3 * 3],
+                              const double translation[3],
+                              double fmatrix[3 * 3]);
 
 }  // namespace theia
 

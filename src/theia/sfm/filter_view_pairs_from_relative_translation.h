@@ -38,11 +38,11 @@
 #include <Eigen/Core>
 #include <unordered_map>
 
-#include "theia/util/hash.h"
-#include "theia/sfm/twoview_info.h"
 #include "theia/sfm/types.h"
 
 namespace theia {
+
+class ViewGraph;
 
 struct FilterViewPairsFromRelativeTranslationOptions {
   // Filtering the translations is embarassingly parallel (each iteration can
@@ -56,7 +56,7 @@ struct FilterViewPairsFromRelativeTranslationOptions {
   // The parameter translation_projection_tolerance determines which
   // translations are considered "bad" after analyzing their projections over
   // many iterations (it corresponds to tau in the paper).
-  double translation_projection_tolerance = 0.1;
+  double translation_projection_tolerance = 0.08;
 };
 
 // Filters view pairs based on the relative translation estimations according to
@@ -72,7 +72,7 @@ struct FilterViewPairsFromRelativeTranslationOptions {
 void FilterViewPairsFromRelativeTranslation(
     const FilterViewPairsFromRelativeTranslationOptions& options,
     const std::unordered_map<ViewId, Eigen::Vector3d>& orientations,
-    std::unordered_map<ViewIdPair, TwoViewInfo>* view_pairs);
+    ViewGraph* view_graph);
 
 }  // namespace theia
 

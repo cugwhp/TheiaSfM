@@ -109,16 +109,19 @@ void TestTriangulationBasic(const TriangulationType type,
                        image_point1, image_point2,
                        &triangulated_point));
   } else if (type == MIDPOINT) {
+    std::vector<Eigen::Vector3d> origins;
+    std::vector<Eigen::Vector3d> directions;
+
     const Matrix3d rotation1 = pose1.block<3, 3>(0, 0);
-    const Vector3d origin1 = -rotation1.transpose() * pose1.col(3);
-    const Vector3d ray1 =
-        (rotation1.transpose() * image_point1.homogeneous()).normalized();
+    origins.emplace_back(-rotation1.transpose() * pose1.col(3));
+    directions.emplace_back(
+        (rotation1.transpose() * image_point1.homogeneous()).normalized());
     const Matrix3d rotation2 = pose2.block<3, 3>(0, 0);
-    const Vector3d origin2 = -rotation2.transpose() * pose2.col(3);
-    const Vector3d ray2 =
-        (rotation2.transpose() * image_point2.homogeneous()).normalized();
+    origins.emplace_back(-rotation2.transpose() * pose2.col(3));
+    directions.emplace_back(
+        (rotation2.transpose() * image_point2.homogeneous()).normalized());
     EXPECT_TRUE(
-        TriangulateMidpoint(origin1, ray1, origin2, ray2, &triangulated_point));
+        TriangulateMidpoint(origins, directions, &triangulated_point));
   } else {
     LOG(ERROR) << "Incompatible Triangulation type!";
   }
@@ -181,13 +184,19 @@ void TestTriangulationManyPoints(const double projection_noise,
     { 0.31, -2.77, 7.54 }, { 0.54, -3.77, 9.77 },
   };
 
+  Eigen::Matrix3d calibration;
+  calibration <<
+      800.0, 0.0, 600.0,
+      0.0, 800.0, 400.0,
+      0.0, 0.0, 1.0;
+
   // Set up pose matrices.
   std::vector<Matrix3x4d> poses(num_views);
   for (int i = 0; i < num_views; i++) {
     poses[i] << kRotations[i].toRotationMatrix(), kTranslations[i];
   }
 
-  for (int j = 0; j < ARRAYSIZE(kTestPoints); j++) {
+  for (int j = 0; j < THEIA_ARRAYSIZE(kTestPoints); j++) {
     // Reproject model point into the images.
     std::vector<Vector2d> image_points(num_views);
     const Vector3d model_point(kTestPoints[j][0], kTestPoints[j][1],
@@ -418,6 +427,73 @@ TEST(IsTriangulatedPointInFrontOfCameras, OneInFrontOneBehind) {
   const Vector3d position(0, 0, -2);
   const Vector3d point(0, 0, 1);
   TestIsTriangulatedPointInFrontOfCameras(point, rotation, position, false);
+}
+
+TEST(SufficientTriangulationAngle, AllSufficient) {
+  static const double kMinSufficientAngle = 4.0;
+  static const double kAngleBetweenCameras = 5.0;
+
+  // Try varying numbers of cameras observing a 3d point from 2 to 50 cameras.
+  for (int i = 2; i < 50; i++) {
+    // Set up cameras on a unit circle so that the angles are known. Assume that
+    // the triangulated point is at (0, 0, 0).
+    std::vector<Vector3d> rays;
+    for (int j = 0; j < i; j++) {
+      rays.emplace_back(cos(DegToRad(j * kAngleBetweenCameras)),
+                        sin(DegToRad(j * kAngleBetweenCameras)),
+                        0.0);
+    }
+
+    EXPECT_TRUE(SufficientTriangulationAngle(rays, kMinSufficientAngle));
+  }
+}
+
+TEST(SufficientTriangulationAngle, AllInsufficient) {
+  static const double kMinSufficientAngle = 4.0;
+
+  // Try varying numbers of cameras observing a 3d point from 2 to 50 cameras.
+  for (int i = 2; i < 50; i++) {
+    // Set up cameras on a unit circle so that the angles are known. Assume that
+    // the triangulated point is at (0, 0, 0).
+    std::vector<Vector3d> rays;
+    const double angle = kMinSufficientAngle / static_cast<double>(i + 1e-4);
+    for (int j = 0; j < i; j++) {
+      rays.emplace_back(cos(DegToRad(j * angle)),
+                        sin(DegToRad(j * angle)),
+                        0.0);
+    }
+
+    EXPECT_FALSE(SufficientTriangulationAngle(rays, kMinSufficientAngle));
+  }
+}
+
+TEST(SufficientTriangulationAngle, SomeInsufficient) {
+  static const double kMinSufficientAngle = 4.0;
+
+  // Set up cameras on a unit circle so that the angles are known. Assume that
+  // the triangulated point is at (0, 0, 0).
+  std::vector<Vector3d> rays;
+  rays.emplace_back(cos(DegToRad(0)), sin(DegToRad(0)), 0.0);
+  rays.emplace_back(cos(DegToRad(5.0)), sin(DegToRad(5.0)), 0.0);
+  rays.emplace_back(cos(DegToRad(1.0)), sin(DegToRad(1.0)), 0.0);
+
+  // We only need one pair of rays to have a sufficient viewing angle, so this
+  // should return true since views 0 and 2 have a viewing angle of 5 degree.
+  EXPECT_TRUE(SufficientTriangulationAngle(rays, kMinSufficientAngle));
+}
+
+TEST(SufficientTriangulationAngle, TwoInsufficient) {
+  static const double kMinSufficientAngle = 4.0;
+
+  // Set up cameras on a unit circle so that the angles are known. Assume that
+  // the triangulated point is at (0, 0, 0).
+  std::vector<Vector3d> rays;
+  rays.emplace_back(cos(DegToRad(0)), sin(DegToRad(0)), 0.0);
+  rays.emplace_back(cos(DegToRad(1.0)), sin(DegToRad(1.0)), 0.0);
+
+  // We only need one pair of rays to have a sufficient viewing angle, so this
+  // should return true since views 0 and 2 have a viewing angle of 5 degree.
+  EXPECT_FALSE(SufficientTriangulationAngle(rays, kMinSufficientAngle));
 }
 
 }  // namespace

@@ -58,10 +58,12 @@ bool SiftDetector::DetectKeypoints(const FloatImage& image,
   if (sift_filter_ == nullptr || (sift_filter_->width != image.Cols() ||
                                   sift_filter_->height != image.Rows())) {
     vl_sift_delete(sift_filter_);
-    sift_filter_ = vl_sift_new(image.Cols(), image.Rows(), num_octaves_,
-                               num_levels_, first_octave_);
-    vl_sift_set_edge_thresh(sift_filter_, 5.0);
-    vl_sift_set_peak_thresh(sift_filter_, 0.5);
+    sift_filter_ = vl_sift_new(image.Cols(), image.Rows(),
+                               sift_params_.num_octaves,
+                               sift_params_.num_levels,
+                               sift_params_.first_octave);
+    vl_sift_set_edge_thresh(sift_filter_, sift_params_.edge_threshold);
+    vl_sift_set_peak_thresh(sift_filter_, sift_params_.peak_threshold);
   }
 
   // The VLFeat functions take in a non-const image pointer so that it can
@@ -90,6 +92,11 @@ bool SiftDetector::DetectKeypoints(const FloatImage& image,
       int num_angles = vl_sift_calc_keypoint_orientations(sift_filter_,
                                                           angles,
                                                           &vl_keypoints[i]);
+      // If upright sift is enabled, only use the first keypoint at a given
+      // pixel location.
+      if (sift_params_.upright_sift && num_angles > 1) {
+        num_angles = 1;
+      }
       for (int j = 0; j < num_angles; j++) {
         Keypoint keypoint(vl_keypoints[i].x, vl_keypoints[i].y, Keypoint::SIFT);
         keypoint.set_scale(vl_keypoints[i].sigma);

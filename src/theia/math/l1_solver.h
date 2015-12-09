@@ -49,25 +49,25 @@ namespace l1_solver_internal {
 
 inline void AnalyzePattern(
     const Eigen::SparseMatrix<double>& spd_mat,
-    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> >* linear_solver) {
+    Eigen::SimplicialLLT<Eigen::SparseMatrix<double> >* linear_solver) {
   linear_solver->analyzePattern(spd_mat);
 }
 
 inline void AnalyzePattern(
     const Eigen::MatrixXd& spd_mat,
-    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> >* linear_solver) {
+    Eigen::SimplicialLLT<Eigen::SparseMatrix<double> >* linear_solver) {
   linear_solver->analyzePattern(spd_mat.sparseView());
 }
 
 inline void Factorize(
     const Eigen::SparseMatrix<double>& spd_mat,
-    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> >* linear_solver) {
+    Eigen::SimplicialLLT<Eigen::SparseMatrix<double> >* linear_solver) {
   linear_solver->factorize(spd_mat);
 }
 
 inline void Factorize(
     const Eigen::MatrixXd& spd_mat,
-    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> >* linear_solver) {
+    Eigen::SimplicialLLT<Eigen::SparseMatrix<double> >* linear_solver) {
   linear_solver->factorize(spd_mat.sparseView());
 }
 
@@ -107,6 +107,10 @@ class L1Solver {
     CHECK_EQ(linear_solver_.info(), Eigen::Success);
   }
 
+  void SetMaxIterations(const int max_iterations) {
+    options_.max_num_iterations = max_iterations;
+  }
+
   // Solves ||Ax - b||_1 for the optimial L1 solution given an initial guess for
   // x. To solve this we introduce an auxillary variable y such that the
   // solution to:
@@ -137,22 +141,28 @@ class L1Solver {
       // TODO(cmsweeney): Check the dual residual for convergence.
       if (surrogate_duality_gap <= options_.duality_gap_tolerance) {
         VLOG(1) << "Converged in " << i + 1 << " iterations.";
-        break;
+        return;
       }
       const double tau = options_.mu * rhs_.size() / surrogate_duality_gap;
 
       // Solve for the direction of the newton step. For L1 minimization this is
       // a special-case which is more simple than the general LP.
-      ComputeNewtonStep(tau);
+      if (!ComputeNewtonStep(tau)) {
+        LOG(WARNING) << "Could not compute Newton step. Exiting at iteration "
+                     << i + 1;
+        return;
+      }
 
       // Compute the maximum step size to remain a feasible solution.
       ComputeStepSize(tau);
     }
+    VLOG(1) << "L1 solver did not converge after max_num_iterations ("
+            << options_.max_num_iterations << "). Exiting.";
   }
 
  private:
   // Determines the primal-dual search direction from the linear program.
-  void ComputeNewtonStep(const double tau) {
+  bool ComputeNewtonStep(const double tau) {
     const double inv_tau = 1.0 / tau;
     const Eigen::VectorXd x_quotient = lambda1_.cwiseQuotient(primal_penalty1_);
     const Eigen::VectorXd y_quotient = lambda2_.cwiseQuotient(primal_penalty2_);
@@ -171,9 +181,16 @@ class L1Solver {
         w1 - a_.transpose() * ((sig2.cwiseQuotient(sig1)).cwiseProduct(w2));
     const MatrixType lhs = a_.transpose() * sigx.asDiagonal() * a_;
 
+    // Factorize the matrix based on the current linear system. If factorization
+    // fails, return false.
     l1_solver_internal::Factorize(lhs, &linear_solver_);
-    dx_ = linear_solver_.solve(w1p);
+    if (linear_solver_.info() != Eigen::Success) {
+      LOG(WARNING) << "Failed to compute a Sparse Cholesky factorization for "
+                      "Simplicial LLT.";
+      return false;
+    }
 
+    dx_ = linear_solver_.solve(w1p);
     CHECK_EQ(linear_solver_.info(), Eigen::Success);
 
     adx_ = a_ * dx_;
@@ -185,6 +202,7 @@ class L1Solver {
     dlambda2_ =
         (lambda2_.cwiseQuotient(primal_penalty2_)).cwiseProduct(adx_ + dy_) -
         lambda2_ - (inv_tau * primal_penalty2_.array().inverse()).matrix();
+    return true;
   }
 
   // Computes a step size to ensure that the solution will lie within the
@@ -249,21 +267,21 @@ class L1Solver {
     // primal_penalty1, primal_penalty2 > 0.
     double step_size = ComputeFeasibleStep();
 
-    lambda1_ += step_size * dlambda1_;
-    lambda2_ += step_size * dlambda2_;
-
-    // Precompute some values.
-    rdual = ((-lambda1_ - lambda2_).array() + 1.0).matrix().squaredNorm();
-
-    Eigen::VectorXd x_p, y_p, axp, atvp;
+    Eigen::VectorXd x_p, y_p, lambda1_p, lambda2_p, axp, atvp;
     for (int i = 0; i < kMaxBacktrackIterations; i++) {
       x_p = *x_ + step_size * dx_;
       y_p = y_ + step_size * dy_;
+
       axp = ax_ + step_size * adx_;
       atvp = atv_ + step_size * atdv;
+
+      lambda1_p = lambda1_ + step_size * dlambda1_;
+      lambda2_p = lambda2_ + step_size * dlambda2_;
+
       primal_penalty1_ = axp - rhs_ - y_p;
       primal_penalty2_ = -axp + rhs_ - y_p;
 
+      rdual = ((-lambda1_p - lambda2_p).array() + 1.0).matrix().squaredNorm();
       temp1 = (-lambda1_.cwiseProduct(primal_penalty1_)).array() + inv_tau;
       temp2 = (-lambda2_.cwiseProduct(primal_penalty2_)).array() + inv_tau;
       const double step_norm =
@@ -277,6 +295,8 @@ class L1Solver {
 
     *x_ = x_p;
     y_ = y_p;
+    lambda1_ = lambda1_p;
+    lambda2_ = lambda2_p;
     ax_ = axp;
     atv_ = atvp;
   }
@@ -308,7 +328,7 @@ class L1Solver {
 
   // Cholesky linear solver. Since our linear system will be a SPD matrix we can
   // utilize the Cholesky factorization.
-  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > linear_solver_;
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<double> > linear_solver_;
 };
 
 }  // namespace theia

@@ -35,8 +35,10 @@
 #ifndef THEIA_SFM_TWOVIEW_INFO_H_
 #define THEIA_SFM_TWOVIEW_INFO_H_
 
+#include <cereal/access.hpp>
 #include <Eigen/Core>
 
+#include "theia/io/eigen_serializable.h"
 #include "theia/sfm/types.h"
 
 namespace theia {
@@ -44,12 +46,14 @@ namespace theia {
 // A struct to hold match and projection data between two views. It is assumed
 // that the first view is at the origin with an identity rotation.
 struct TwoViewInfo {
+ public:
   TwoViewInfo()
       : focal_length_1(0.0),
         focal_length_2(0.0),
         position_2(Eigen::Vector3d::Zero()),
         rotation_2(Eigen::Vector3d::Zero()),
-        num_verified_matches(0) {}
+        num_verified_matches(0),
+        num_homography_inliers(0) {}
 
   double focal_length_1;
   double focal_length_2;
@@ -60,6 +64,24 @@ struct TwoViewInfo {
   // Number of features that were matched and geometrically verified betwen the
   // images.
   int num_verified_matches;
+
+  // Number of inliers based on homography estimation. This is useful for
+  // incremental SfM for choosing an initial view pair for the reconstruction.
+  int num_homography_inliers;
+
+ private:
+  // Templated method for disk I/O with cereal. This method tells cereal which
+  // data members should be used when reading/writing to/from disk.
+  friend class cereal::access;
+  template <class Archive>
+  void serialize(Archive& ar) {  // NOLINT
+    ar(focal_length_1,
+       focal_length_2,
+       position_2,
+       rotation_2,
+       num_verified_matches,
+       num_homography_inliers);
+  }
 };
 
 // Inverts the two view info such that the focal lengths are swapped and the

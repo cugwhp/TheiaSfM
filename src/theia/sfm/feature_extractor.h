@@ -36,135 +36,61 @@
 #define THEIA_SFM_FEATURE_EXTRACTOR_H_
 
 #include <Eigen/Core>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "theia/alignment/alignment.h"
-#include "theia/image/descriptor/descriptor_extractor.h"
+#include "theia/image/descriptor/create_descriptor_extractor.h"
 #include "theia/image/image.h"
-#include "theia/util/filesystem.h"
-#include "theia/util/threadpool.h"
-#include "theia/sfm/camera_intrinsics_prior.h"
+#include "theia/image/keypoint_detector/sift_parameters.h"
 
 namespace theia {
-
-// The various types of feature descriptors you can choose. We use the default
-// keypoint extractor for each feature type. Since this is a convenience class
-// anyways, this functionality is acceptable. If more flexibility (custom
-// features and custom descriptors) is needed then a new class may be developed.
-enum class DescriptorExtractorType {
-  SIFT = 0,
-  BRIEF = 1,
-  BRISK = 2,
-  FREAK = 3
-};
-
-struct FeatureExtractorOptions {
-  int num_threads = 1;
-  DescriptorExtractorType descriptor_extractor_type =
-      DescriptorExtractorType::SIFT;
-  // The features returned will be no larger than this size.
-  int max_num_features = 16384;
-};
 
 // Reads in the set of images provided then extracts descriptors using the
 // desired descriptor type. This method can be run with multiple threads.
 class FeatureExtractor {
  public:
-  explicit FeatureExtractor(const FeatureExtractorOptions& options)
-      : options_(options) {}
+  struct Options {
+    int num_threads = 1;
+    DescriptorExtractorType descriptor_extractor_type =
+        DescriptorExtractorType::SIFT;
+    // Sift parameters.
+    SiftParameters sift_parameters;
+    // The features returned will be no larger than this size.
+    int max_num_features = 16384;
+
+    // If we wish to write the features to disk, they will be output in this
+    // directory with the same name as the input image and a ".features"
+    // appended.
+    std::string output_directory = "";
+  };
+
+  explicit FeatureExtractor(const Options& options)
+      : options_(options), write_features_to_disk_(false) {}
   ~FeatureExtractor() {}
 
-  // Method to extract descriptors. Descriptors must be a float descriptor
-  // Eigen::VectorXf (e.g., SIFT) or a BinaryVectorX.
-  template <typename DescriptorType>
+  // Method to extract descriptors.
   bool Extract(const std::vector<std::string>& filenames,
-               std::vector<std::vector<Keypoint>*>* keypoints,
-               std::vector<std::vector<DescriptorType>*>* descriptors);
+               std::vector<std::vector<Keypoint> >* keypoints,
+               std::vector<std::vector<Eigen::VectorXf> >* descriptors);
+
+  // Extracts descriptors and writes them to disk. The features from each image
+  // are written to individual files in the directory specified in the options.
+  bool ExtractToDisk(const std::vector<std::string>& filenames);
 
  private:
   // Extracts the features and metadata for a single image. This function is
   // called by the threadpool and is thus thread safe.
-  template <typename DescriptorType>
   bool ExtractFeatures(const std::string& filename,
                        std::vector<Keypoint>* keypoints,
-                       std::vector<DescriptorType>* descriptors);
+                       std::vector<Eigen::VectorXf>* descriptors);
 
-  // Factory method to create the keypoint detector and descriptor extractor.
-  std::unique_ptr<DescriptorExtractor> CreateDescriptorExtractor(
-      const DescriptorExtractorType& descriptor_extractor_type);
-
-  const FeatureExtractorOptions options_;
+  const Options options_;
+  bool write_features_to_disk_;
 
   DISALLOW_COPY_AND_ASSIGN(FeatureExtractor);
 };
-
-// ---------------------- Implementation ------------------------- //
-template <typename DescriptorType>
-bool FeatureExtractor::Extract(
-    const std::vector<std::string>& filenames,
-    std::vector<std::vector<Keypoint>*>* keypoints,
-    std::vector<std::vector<DescriptorType>*>* descriptors) {
-  CHECK_NOTNULL(keypoints)->resize(filenames.size());
-  CHECK_NOTNULL(descriptors)->resize(filenames.size());
-
-  // The thread pool will wait to finish all jobs when it goes out of scope.
-  std::unique_ptr<ThreadPool> feature_extractor_pool(
-      new ThreadPool(options_.num_threads));
-  for (int i = 0; i < filenames.size(); i++) {
-    if (!FileExists(filenames[i])) {
-      LOG(ERROR) << "Could not extract features for " << filenames[i]
-                 << " because the file cannot be found.";
-      continue;
-    }
-
-    keypoints->at(i) = new std::vector<Keypoint>();
-    descriptors->at(i) = new std::vector<DescriptorType>();
-    feature_extractor_pool->Add(
-        &FeatureExtractor::ExtractFeatures<DescriptorType>,
-        this,
-        filenames[i],
-        keypoints->at(i),
-        descriptors->at(i));
-  }
-  return true;
-}
-
-template <typename DescriptorType>
-bool FeatureExtractor::ExtractFeatures(
-    const std::string& filename,
-    std::vector<Keypoint>* keypoints,
-    std::vector<DescriptorType>* descriptors) {
-  std::unique_ptr<FloatImage> image(new FloatImage(filename));
-
-  // We create these variable here instead of upon the construction of the
-  // object so that they can be thread-safe. We *should* be able to use the
-  // static thread_local keywords, but apparently Mac OS-X's version of clang
-  // does not actually support it!
-  //
-  // TODO(cmsweeney): Change this so that each thread in the threadpool receives
-  // exactly one object.
-  std::unique_ptr<DescriptorExtractor> descriptor_extractor =
-      CreateDescriptorExtractor(options_.descriptor_extractor_type);
-
-  // Exit if the descriptor extraction fails.
-  if (!descriptor_extractor->DetectAndExtractDescriptors(*image,
-                                                         keypoints,
-                                                         descriptors)) {
-    LOG(ERROR) << "Could not extract descriptors in image " << filename;
-    return false;
-  }
-
-  if (keypoints->size() > options_.max_num_features) {
-    keypoints->resize(options_.max_num_features);
-    descriptors->resize(options_.max_num_features);
-  }
-
-  VLOG(1) << "Successfully extracted " << descriptors->size()
-          << " features from image " << filename;
-  return true;
-}
-
 
 }  // namespace theia
 

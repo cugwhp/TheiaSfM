@@ -34,9 +34,8 @@
 
 #include <glog/logging.h>
 #include <gflags/gflags.h>
-#include <time.h>
 #include <theia/theia.h>
-#include <chrono>  // NOLINT
+#include <fstream>  // NOLINT
 #include <string>
 #include <vector>
 
@@ -44,29 +43,57 @@
 DEFINE_string(images, "", "Wildcard of images to reconstruct.");
 DEFINE_string(output_calibration_file, "",
               "Calibration file containing image calibration data.");
-
-typedef std::unordered_map<std::pair<std::string, std::string>, double>
-    SensorWidthDatabase;
-
-void LoadSensorWidthDatabase(SensorWidthDatabase* sensor_width_database) {
-  // Read the file line by line.
-  // Separate by semicolon.
-  // Set make and model to lower case.
-  // Add to the database.
-
-  // TODO(cmsweeney): Add this to the main exif function.
-}
+DEFINE_bool(initialize_uncalibrated_images_with_median_viewing_angle, true,
+            "Images with no EXIF information initialize the focal length based "
+            "on a focal length corresponding to a median viewing angle.");
 
 int main(int argc, char *argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  THEIA_GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
 
-  SensorWidthDatabase sensor_width_database;
-  LoadSensorWidthDatabase(&sensor_width_database);
+  std::vector<std::string> image_files;
+  CHECK(theia::GetFilepathsFromWildcard(FLAGS_images, &image_files))
+      << "Could not find images that matched the filepath: " << FLAGS_images
+      << ". NOTE that the ~ filepath is not supported.";
 
-  for (int i = 0; i < image_files.size(); i++) {
-    // Attempt to load with exif parser.
-
-    // Attempt to look up in database.
+  std::ofstream ofs(FLAGS_output_calibration_file, std::ios::out);
+  if (!ofs.is_open()) {
+    LOG(ERROR) << "Could not open the calibration file: "
+               << FLAGS_output_calibration_file << " for writing.";
+    return false;
   }
+
+  theia::ExifReader exif_reader;
+
+  //   image_name focal_length ppx ppy aspect_ratio skew k1 k2
+  for (int i = 0; i < image_files.size(); i++) {
+    theia::CameraIntrinsicsPrior prior;
+    CHECK(exif_reader.ExtractEXIFMetadata(image_files[i], &prior))
+        << "Could not open " << image_files[i] << " for reading.";
+
+    // Only write the calibration for images with a focal length that was
+    // extracted.
+    if (!prior.focal_length.is_set) {
+      if (FLAGS_initialize_uncalibrated_images_with_median_viewing_angle) {
+        // Set the focal length based on a median viewing angle.
+        prior.focal_length.is_set = true;
+        prior.focal_length.value =
+            1.2 *
+            static_cast<double>(std::max(prior.image_width, prior.image_height));
+      } else {
+        continue;
+      }
+    }
+
+    std::string image_name;
+    theia::GetFilenameFromFilepath(image_files[i], true, &image_name);
+    // We write the default values for aspect ratio, skew, and radial distortion
+    // since those cannot be recovered from EXIF.
+    LOG(INFO) << image_name << " has an EXIF focal length of "
+              << prior.focal_length.value;
+    ofs << image_name << " " << prior.focal_length.value << " "
+        << prior.principal_point[0].value << " "
+        << prior.principal_point[1].value << " 1.0 0.0 0.0 0.0\n";
+  }
+  ofs.close();
 }

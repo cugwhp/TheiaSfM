@@ -36,6 +36,8 @@
 
 #include <easyexif/exif.h>
 #include <glog/logging.h>
+
+#include <algorithm>
 #include <fstream>  // NOLINT
 #include <iostream>  // NOLINT
 #include <sstream>
@@ -170,7 +172,8 @@ bool ExifReader::ExtractEXIFMetadata(
       exif_parser.FocalPlaneResolutionUnit > 1 &&
       exif_parser.FocalPlaneResolutionUnit <= 5) {
     SetFocalLengthFromExif(exif_parser,
-                           camera_intrinsics_prior->image_width,
+                           image.Width(),
+                           image.Height(),
                            camera_intrinsics_prior);
   } else {
     SetFocalLengthFromSensorDatabase(
@@ -190,35 +193,46 @@ bool ExifReader::ExtractEXIFMetadata(
 void ExifReader::SetFocalLengthFromExif(
     const EXIFInfo& exif_parser,
     const double image_width,
+    const double image_height,
     CameraIntrinsicsPrior* camera_intrinsics_prior) const {
-  // Convert to mm.
-  double focal_length_x = exif_parser.FocalPlaneXResolution;
-
+  // CCD resolution is the pixels per unit resolution of the CCD.
+  double ccd_resolution_units = 1.0;
   switch (exif_parser.FocalPlaneResolutionUnit) {
     case 2:
       // Convert inches to mm.
-      focal_length_x /= 25.4;
+      ccd_resolution_units = 25.4;
       break;
     case 3:
       // Convert centimeters to mm.
-      focal_length_x /= 10.0;
+      ccd_resolution_units = 10.0;
       break;
     case 4:
       // Already in mm.
       break;
     case 5:
       // Convert micrometers to mm.
-      focal_length_x *= 1000.0;
+      ccd_resolution_units = 1.0 / 1000.0;
       break;
     default:
       break;
   }
 
-  // Normalize for the image size in case the original size is different than
-  // the current size.
+  const double ccd_width =
+      exif_parser.ImageWidth /
+      (exif_parser.FocalPlaneXResolution / ccd_resolution_units);
+  const double ccd_height =
+      exif_parser.ImageHeight /
+      (exif_parser.FocalPlaneYResolution / ccd_resolution_units);
+
+  const double focal_length_x =
+      exif_parser.FocalLength * image_width / ccd_width;
+  const double focal_length_y =
+      exif_parser.FocalLength * image_height / ccd_height;
+
+  // Normalize for the image size in case the original size is different
+  // than the current size.
   camera_intrinsics_prior->focal_length.value =
-      (exif_parser.FocalLength * focal_length_x) *
-      (image_width / static_cast<double>(exif_parser.ImageWidth));
+      (focal_length_x + focal_length_y) / 2.0;
   camera_intrinsics_prior->focal_length.is_set = true;
 }
 

@@ -99,11 +99,12 @@ bool CascadeHasher::Initialize(const int num_dimensions_of_descriptor) {
   return true;
 }
 
-void CascadeHasher::CreateHashedDescriptors(HashedImage* hashed_image) const {
-  for (int i = 0; i < hashed_image->descriptors.size(); i++) {
+void CascadeHasher::CreateHashedDescriptors(
+    const std::vector<Eigen::VectorXf>& sift_desc,
+    HashedImage* hashed_image) const {
+  for (int i = 0; i < sift_desc.size(); i++) {
     // Use the zero-mean shifted descriptor.
-    const auto descriptor =
-        hashed_image->descriptors[i] - hashed_image->mean_descriptor;
+    const auto descriptor = sift_desc[i] - hashed_image->mean_descriptor;
     auto& hash_code = hashed_image->hashed_desc[i].hash_code;
 
     // Compute hash code.
@@ -146,7 +147,10 @@ void CascadeHasher::BuildBuckets(HashedImage* hashed_image) const {
 //   3) Construct buckets.
 HashedImage CascadeHasher::CreateHashedSiftDescriptors(
     const std::vector<Eigen::VectorXf>& sift_desc) const {
-  HashedImage hashed_image(sift_desc);
+  HashedImage hashed_image;
+  if (sift_desc.size() == 0) {
+    return hashed_image;
+  }
 
   GetZeroMeanDescriptor(sift_desc, &hashed_image.mean_descriptor);
 
@@ -159,7 +163,7 @@ HashedImage CascadeHasher::CreateHashedSiftDescriptors(
   }
 
   // Create hash codes for each feature.
-  CreateHashedDescriptors(&hashed_image);
+  CreateHashedDescriptors(sift_desc, &hashed_image);
 
   // Build the buckets.
   BuildBuckets(&hashed_image);
@@ -170,27 +174,30 @@ HashedImage CascadeHasher::CreateHashedSiftDescriptors(
 // previously generated.
 void CascadeHasher::MatchImages(
     const HashedImage& hashed_image1,
+    const std::vector<Eigen::VectorXf>& descriptors1,
     const HashedImage& hashed_image2,
+    const std::vector<Eigen::VectorXf>& descriptors2,
     const double lowes_ratio,
     std::vector<IndexedFeatureMatch>* matches) const {
   static const int kNumTopCandidates = 10;
+  const double sq_lowes_ratio = lowes_ratio * lowes_ratio;
   L2 l2_distance;
 
   // Reserve space for the matches.
-  matches->reserve(static_cast<int>(std::min(
-      hashed_image1.descriptors.size(), hashed_image2.descriptors.size())));
+  matches->reserve(
+      static_cast<int>(std::min(descriptors1.size(), descriptors2.size())));
 
   // Preallocate the candidate descriptors container.
   std::vector<int> candidate_descriptors;
-  candidate_descriptors.reserve(hashed_image2.descriptors.size());
+  candidate_descriptors.reserve(descriptors2.size());
 
   // Preallocated hamming distances. Each column indicates the hamming distance
   // and the rows collect the descriptor ids with that
   // distance. num_descriptors_with_hamming_distance keeps track of how many
   // descriptors have that distance.
-  Eigen::MatrixXi candidate_hamming_distances(hashed_image2.descriptors.size(),
+  Eigen::MatrixXi candidate_hamming_distances(descriptors2.size(),
                                               kHashCodeSize + 1);
-  Eigen::VectorXf num_descriptors_with_hamming_distance(kHashCodeSize + 1);
+  Eigen::VectorXi num_descriptors_with_hamming_distance(kHashCodeSize + 1);
 
   // Preallocate the container for keeping euclidean distances.
   std::vector<std::pair<float, int> > candidate_euclidean_distances;
@@ -198,7 +205,7 @@ void CascadeHasher::MatchImages(
 
   // A preallocated vector to determine if we have already used a particular
   // feature for matching (i.e., prevents duplicates).
-  std::vector<bool> used_descriptor(hashed_image2.descriptors.size());
+  std::vector<bool> used_descriptor(descriptors2.size());
   for (int i = 0; i < hashed_image1.hashed_desc.size(); i++) {
     candidate_descriptors.clear();
     num_descriptors_with_hamming_distance.setZero();
@@ -244,8 +251,7 @@ void CascadeHasher::MatchImages(
       for (int k = 0; k < num_descriptors_with_hamming_distance(j); k++) {
         const int candidate_id = candidate_hamming_distances(k, j);
         const float distance =
-            l2_distance(hashed_image2.descriptors[candidate_id],
-                        hashed_image1.descriptors[i]);
+            l2_distance(descriptors2[candidate_id], descriptors1[i]);
         candidate_euclidean_distances.emplace_back(distance, candidate_id);
         if (candidate_euclidean_distances.size() > kNumTopCandidates) {
           break;
@@ -263,7 +269,7 @@ void CascadeHasher::MatchImages(
 
     // Only add to output matches if it passes the ratio test.
     if (candidate_euclidean_distances[0].first >
-        candidate_euclidean_distances[1].first * lowes_ratio) {
+        candidate_euclidean_distances[1].first * sq_lowes_ratio) {
       continue;
     }
 
@@ -271,8 +277,6 @@ void CascadeHasher::MatchImages(
                           candidate_euclidean_distances[0].second,
                           candidate_euclidean_distances[0].first);
   }
-
 }
-
 
 }  // namespace theia

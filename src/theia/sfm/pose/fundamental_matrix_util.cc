@@ -170,4 +170,34 @@ void FundamentalMatrixFromProjectionMatrices(const double pmatrix1[3 * 4],
   }
 }
 
+void EssentialMatrixFromFundamentalMatrix(const double fmatrix[3 * 3],
+                                          const double focal_length1,
+                                          const double focal_length2,
+                                          double ematrix[3 * 3]) {
+  const Eigen::Map<const Matrix3d> fundamental_matrix(fmatrix);
+  Eigen::Map<Matrix3d> essential_matrix(ematrix);
+  essential_matrix =
+      Eigen::DiagonalMatrix<double, 3>(focal_length2, focal_length2, 1.0) *
+      fundamental_matrix *
+      Eigen::DiagonalMatrix<double, 3>(focal_length1, focal_length1, 1.0);
+}
+
+void ComposeFundamentalMatrix(const double focal_length1,
+                              const double focal_length2,
+                              const double rotation[3 * 3],
+                              const double translation[3],
+                              double fmatrix[3 * 3]) {
+  const Matrix3d calibration_inv1 = Eigen::DiagonalMatrix<double, 3>(
+      focal_length1, focal_length1, 1.0).inverse();
+  const Matrix3d calibration_inv2 = Eigen::DiagonalMatrix<double, 3>(
+      focal_length2, focal_length2, 1.0).inverse();
+
+  const Eigen::Map<const Eigen::Matrix3d> rot(rotation);
+  const Eigen::Map<const Eigen::Vector3d> trans(translation);
+
+  Eigen::Map<Eigen::Matrix3d> fundamental_matrix(fmatrix);
+  fundamental_matrix =
+      calibration_inv2 * CrossProductMatrix(trans) * rot * calibration_inv1;
+}
+
 }  // namespace theia

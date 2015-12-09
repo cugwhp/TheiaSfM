@@ -54,15 +54,15 @@ template <class DistanceMetric>
 class BruteForceFeatureMatcher : public FeatureMatcher<DistanceMetric> {
  public:
   typedef typename DistanceMetric::DistanceType DistanceType;
-  typedef typename DistanceMetric::DescriptorType DescriptorType;
 
-  BruteForceFeatureMatcher() {}
+  explicit BruteForceFeatureMatcher(const FeatureMatcherOptions& options)
+      : FeatureMatcher<DistanceMetric>(options) {}
   ~BruteForceFeatureMatcher() {}
 
  private:
   bool MatchImagePair(
-      const int image_index1,
-      const int image_index2,
+      const KeypointsAndDescriptors& features1,
+      const KeypointsAndDescriptors& features2,
       std::vector<FeatureCorrespondence>* matched_featuers) override;
 
   void GetFilteredMatches(const Eigen::MatrixXf& match_distances,
@@ -76,13 +76,17 @@ class BruteForceFeatureMatcher : public FeatureMatcher<DistanceMetric> {
 
 template <class DistanceMetric>
 bool BruteForceFeatureMatcher<DistanceMetric>::MatchImagePair(
-    const int image1_index,
-    const int image2_index,
+    const KeypointsAndDescriptors& features1,
+    const KeypointsAndDescriptors& features2,
     std::vector<FeatureCorrespondence>* matched_features) {
-  const std::vector<DescriptorType>& descriptors1 =
-      *(this->descriptors_[image1_index]);
-  const std::vector<DescriptorType>& descriptors2 =
-      *(this->descriptors_[image2_index]);
+
+  const std::vector<Eigen::VectorXf>& descriptors1 = features1.descriptors;
+  const std::vector<Keypoint>& keypoints1 = features1.keypoints;
+  const std::vector<Eigen::VectorXf>& descriptors2 = features2.descriptors;
+  const std::vector<Keypoint>& keypoints2 = features2.keypoints;
+
+  const double sq_lowes_ratio =
+      this->matcher_options_.lowes_ratio * this->matcher_options_.lowes_ratio;
 
   DistanceMetric distance;
   std::vector<IndexedFeatureMatch> matches;
@@ -104,8 +108,7 @@ bool BruteForceFeatureMatcher<DistanceMetric>::MatchImagePair(
     // Add to the matches vector if lowes ratio test is turned off or it is
     // turned on and passes the test.
     if (!this->matcher_options_.use_lowes_ratio ||
-        temp_matches[0].distance <
-            this->matcher_options_.lowes_ratio * temp_matches[1].distance) {
+        temp_matches[0].distance < sq_lowes_ratio * temp_matches[1].distance) {
       matches.emplace_back(temp_matches[0]);
     }
   }
@@ -135,7 +138,7 @@ bool BruteForceFeatureMatcher<DistanceMetric>::MatchImagePair(
       // turned on and passes the test.
       if (!this->matcher_options_.use_lowes_ratio ||
           temp_matches[0].distance <
-              this->matcher_options_.lowes_ratio * temp_matches[1].distance) {
+              sq_lowes_ratio * temp_matches[1].distance) {
         reverse_matches.emplace_back(temp_matches[0]);
       }
     }
@@ -147,8 +150,6 @@ bool BruteForceFeatureMatcher<DistanceMetric>::MatchImagePair(
   }
 
   // Convert to FeatureCorrespondences and return true
-  const std::vector<Keypoint>& keypoints1 = *this->keypoints_[image1_index];
-  const std::vector<Keypoint>& keypoints2 = *this->keypoints_[image2_index];
   matched_features->resize(matches.size());
   for (int i = 0; i < matches.size(); i++) {
     const Keypoint& keypoint1 = keypoints1[matches[i].feature1_ind];

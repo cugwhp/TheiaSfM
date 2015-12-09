@@ -37,6 +37,7 @@
 
 #include <stdlib.h>
 #include <algorithm>
+#include <numeric>
 #include <vector>
 
 #include "theia/solvers/sampler.h"
@@ -52,19 +53,18 @@ template <class Datum> class RandomSampler : public Sampler<Datum> {
       : Sampler<Datum>(min_num_samples) {}
   ~RandomSampler() {}
 
-  bool Initialize() {
+  bool Initialize() override {
     InitRandomGenerator();
     return true;
   }
 
   // Samples the input variable data and fills the vector subset with the
   // random samples.
-  bool Sample(const std::vector<Datum>& data, std::vector<Datum>* subset) {
+  bool Sample(const std::vector<Datum>& data,
+              std::vector<Datum>* subset) override {
     subset->resize(this->min_num_samples_);
     std::vector<int> random_numbers(data.size());
-    for (int i = 0; i < data.size(); i++) {
-      random_numbers[i] = i;
-    }
+    std::iota(random_numbers.begin(), random_numbers.end(), 0);
 
     for (int i = 0; i < this->min_num_samples_; i++) {
       std::swap(random_numbers[i], random_numbers[RandInt(i, data.size() - 1)]);

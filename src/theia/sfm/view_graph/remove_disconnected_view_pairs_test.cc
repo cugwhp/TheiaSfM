@@ -33,52 +33,67 @@
 // Author: Chris Sweeney (cmsweeney@cs.ucsb.edu)
 
 #include <glog/logging.h>
-#include <unordered_map>
+#include <unordered_set>
 
 #include "gtest/gtest.h"
 
 #include "theia/math/graph/connected_components.h"
-#include "theia/util/hash.h"
 #include "theia/sfm/twoview_info.h"
 #include "theia/sfm/types.h"
 #include "theia/sfm/view_graph/remove_disconnected_view_pairs.h"
+#include "theia/sfm/view_graph/view_graph.h"
+#include "theia/util/map_util.h"
 
 namespace theia {
 
 TEST(RemoveDisconnectedViewPairs, SingleConnectedComponent) {
-  std::unordered_map<ViewIdPair, TwoViewInfo> view_pairs;
+  ViewGraph view_graph;
   TwoViewInfo info;
-  view_pairs[ViewIdPair(0, 1)] = info;
-  view_pairs[ViewIdPair(1, 2)] = info;
-  view_pairs[ViewIdPair(2, 3)] = info;
+  view_graph.AddEdge(0, 1, info);
+  view_graph.AddEdge(1, 2, info);
+  view_graph.AddEdge(2, 3, info);
 
-  RemoveDisconnectedViewPairs(&view_pairs);
-  EXPECT_EQ(view_pairs.size(), 3);
+  const std::unordered_set<ViewId> removed_views =
+      RemoveDisconnectedViewPairs(&view_graph);
+  EXPECT_EQ(view_graph.NumEdges(), 3);
+  EXPECT_EQ(removed_views.size(), 0);
 }
 
 TEST(RemoveDisconnectedViewPairs, TwoConnectedComponents) {
-  std::unordered_map<ViewIdPair, TwoViewInfo> view_pairs;
+  ViewGraph view_graph;
   TwoViewInfo info;
-  view_pairs[ViewIdPair(0, 1)] = info;
-  view_pairs[ViewIdPair(1, 2)] = info;
-  view_pairs[ViewIdPair(2, 3)] = info;
-  view_pairs[ViewIdPair(5, 6)] = info;
+  view_graph.AddEdge(0, 1, info);
+  view_graph.AddEdge(1, 2, info);
+  view_graph.AddEdge(2, 3, info);
+  view_graph.AddEdge(5, 6, info);
+  view_graph.AddEdge(6, 7, info);
 
-  RemoveDisconnectedViewPairs(&view_pairs);
-  EXPECT_EQ(view_pairs.size(), 3);
+  const std::unordered_set<ViewId> removed_views =
+      RemoveDisconnectedViewPairs(&view_graph);
+  EXPECT_EQ(view_graph.NumEdges(), 3);
+  EXPECT_EQ(removed_views.size(), 3);
+  EXPECT_TRUE(ContainsKey(removed_views, 5));
+  EXPECT_TRUE(ContainsKey(removed_views, 6));
+  EXPECT_TRUE(ContainsKey(removed_views, 7));
 }
 
 TEST(RemoveDisconnectedViewPairs, ThreeConnectedComponents) {
-  std::unordered_map<ViewIdPair, TwoViewInfo> view_pairs;
+  ViewGraph view_graph;
   TwoViewInfo info;
-  view_pairs[ViewIdPair(0, 1)] = info;
-  view_pairs[ViewIdPair(1, 2)] = info;
-  view_pairs[ViewIdPair(2, 3)] = info;
-  view_pairs[ViewIdPair(5, 6)] = info;
-  view_pairs[ViewIdPair(7, 8)] = info;
+  view_graph.AddEdge(0, 1, info);
+  view_graph.AddEdge(1, 2, info);
+  view_graph.AddEdge(2, 3, info);
+  view_graph.AddEdge(5, 6, info);
+  view_graph.AddEdge(7, 8, info);
 
-  RemoveDisconnectedViewPairs(&view_pairs);
-  EXPECT_EQ(view_pairs.size(), 3);
+  const std::unordered_set<ViewId> removed_views =
+      RemoveDisconnectedViewPairs(&view_graph);
+  EXPECT_EQ(view_graph.NumEdges(), 3);
+  EXPECT_EQ(removed_views.size(), 4);
+  EXPECT_TRUE(ContainsKey(removed_views, 5));
+  EXPECT_TRUE(ContainsKey(removed_views, 6));
+  EXPECT_TRUE(ContainsKey(removed_views, 7));
+  EXPECT_TRUE(ContainsKey(removed_views, 8));
 }
 
 }  // namespace theia

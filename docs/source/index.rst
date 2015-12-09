@@ -28,6 +28,15 @@ link the library:
 
 ``#include <theia/theia.h>``
 
+After compiling and executing ``make install``, the simplest way to add and link
+the library is with the following CMake commands:
+
+.. code::
+
+  find_package(Theia REQUIRED)
+  include_directories(${THEIA_INCLUDE_DIRS})
+  target_link_libraries(my_library ${THEIA_LIBRARIES})
+
 We attempt to provide sufficient documentation but often further documentation
 can be found in the source code itself. You will likely find the API
 documentation useful as well. Additionally, (nearly) every file is covered by a
@@ -39,6 +48,14 @@ mailing list <http://groups.google.com/group/theia-vision-library>`_
 Finally, it should be noted that all the code in Theia is under the namespace
 theia, so you will have to reference that namespace in order to use functions
 from this library.
+
+Performance
+===========
+
+Theia achieves state-of-the-art SfM performance on large-scale
+datasets. Efficiency and robustness is a key component of the library. You can
+see the latest performance benchmarks for small and large-scale datasets on the
+:ref:`chapter-performance` page.
 
 Citation
 ========
@@ -52,13 +69,24 @@ manual. e.g., ::
           Organization = {University of California Santa Barbara.}
   }
 
+When using specific algorithms that are implemented within Theia, we ask that
+you please cite the original sources. More information on which files use which
+references in the literature can be found in the header files of the relevant
+functions.
+
 ================
 Acknowledgements
 ================
 
-Theia was originally developed to provide a centralized code base to the `Four Eyes Lab <http://ilab.cs.ucsb.edu>`_ at UC Santa Barbara, but has since been expanded to an open-source project for the vision community.
+Theia was originally developed to provide a centralized code base to the `Four
+Eyes Lab <http://ilab.cs.ucsb.edu>`_ at UC Santa Barbara, but has since been
+expanded to an open-source project for the vision community.
 
-The core of the original library is written by `Chris Sweeney <http://cs.ucsb.edu/~cmsweeney>`_. Funding for Theia was provided by his advisors `Tobias Hollerer <http://cs.ucsb.edu/~holl>`_ and `Matthew Turk <http://cs.ucsb.edu/~mturk>`_ and NSF Graduate Research Fellowship Grant DGE-1144085.
+The core of the original library is written by `Chris Sweeney
+<http://cs.ucsb.edu/~cmsweeney>`_. Funding for Theia was provided by his
+advisors `Tobias Hollerer <http://cs.ucsb.edu/~holl>`_ and `Matthew Turk
+<http://cs.ucsb.edu/~mturk>`_ in part by NSF Grant IIS-1219261, ONR Grant
+N00014-14-1-0133, and NSF Graduate Research Fellowship Grant DGE-1144085.
 
 .. toctree::
    :maxdepth: 3
@@ -67,6 +95,7 @@ The core of the original library is written by `Chris Sweeney <http://cs.ucsb.ed
    building
    api
    applications
+   performance
    contributions
    releases
    bibliography

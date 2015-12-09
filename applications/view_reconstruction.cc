@@ -61,23 +61,36 @@ DEFINE_string(reconstruction, "", "Reconstruction file to be viewed.");
 // Containers for the data.
 std::vector<theia::Camera> cameras;
 std::vector<Eigen::Vector3d> world_points;
+std::vector<int> num_views_for_track;
 
 // Parameters for OpenGL.
-int mouse_down_x[3], mouse_down_y[3];
-float rot_x = 0.0f, rot_y = 0.0f;
-float prev_x, prev_y;
-float distance = 100.0;
-Eigen::Vector3d origin = Eigen::Vector3d::Zero();
-bool mouse_rotates = false;
-bool draw_cameras = true;
+int width = 1200;
+int height = 800;
 
+// OpenGL camera parameters.
+Eigen::Vector3f viewer_position(0.0, 0.0, 0.0);
+float zoom = -50.0;
+float delta_zoom = 25;
+
+// Rotation values for the navigation
+Eigen::Vector2f navigation_rotation(0.0, 0.0);
+
+// Position of the mouse when pressed
+int mouse_pressed_x = 0, mouse_pressed_y = 0;
+float last_x_offset = 0.0, last_y_offset = 0.0;
+// Mouse button states
+int left_mouse_button_active = 0, right_mouse_button_active = 0;
+
+// Visualization parameters.
+bool draw_cameras = true;
+bool draw_axes = false;
 float point_size = 1.0;
-float camera_scale = 1.0;
+float normalized_focal_length = 1.0;
+int min_num_views_for_track = 3;
+double anti_aliasing_blend = 0.01;
 
 void GetPerspectiveParams(double* aspect_ratio, double* fovy) {
-  int width = 800;
-  int height = 600;
-  double focal_length = 600.0;
+  double focal_length = 800.0;
   *aspect_ratio = static_cast<double>(width) / static_cast<double>(height);
   *fovy = 2 * atan(height / (2.0 * focal_length)) * 180.0 / M_PI;
 }
@@ -86,6 +99,9 @@ void ChangeSize(int w, int h) {
   // Prevent a divide by zero, when window is too short
   // (you cant make a window of zero width).
   if (h == 0) h = 1;
+
+  width = w;
+  height = h;
 
   // Use the Projection Matrix
   glMatrixMode(GL_PROJECTION);
@@ -99,7 +115,7 @@ void ChangeSize(int w, int h) {
   glViewport(0, 0, w, h);
 
   // Set the correct perspective.
-  gluPerspective(fovy, aspect_ratio, 0.01f, 100000.0f);
+  gluPerspective(fovy, aspect_ratio, 0.001f, 100000.0f);
 
   // Get Back to the Reconstructionview
   glMatrixMode(GL_MODELVIEW);
@@ -110,7 +126,7 @@ void DrawAxes(float length) {
 
   glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
   glDisable(GL_LIGHTING);
-
+  glLineWidth(5.0);
   glBegin(GL_LINES);
   glColor3f(1.0, 0.0, 0.0);
   glVertex3f(0, 0, 0);
@@ -126,84 +142,132 @@ void DrawAxes(float length) {
   glEnd();
 
   glPopAttrib();
+  glLineWidth(1.0);
 }
 
 void DrawCamera(const theia::Camera& camera) {
-  const Eigen::Matrix3d rotation =
-      camera.GetOrientationAsRotationMatrix().transpose();
-  const Eigen::Vector3d position = camera.GetPosition();
-
   glPushMatrix();
+  Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Zero();
+  transformation_matrix.block<3, 3>(0, 0) =
+      camera.GetOrientationAsRotationMatrix().transpose();
+  transformation_matrix.col(3).head<3>() = camera.GetPosition();
+  transformation_matrix(3, 3) = 1.0;
+
   // Apply world pose transformation.
-  GLdouble glm[16];
-  glm[0] = rotation(0, 0);
-  glm[1] = rotation(1, 0);
-  glm[2] = rotation(2, 0);
-  glm[3] = 0.0;
-  glm[4] = rotation(0, 1);
-  glm[5] = rotation(1, 1);
-  glm[6] = rotation(2, 1);
-  glm[7] = 0.0;
-  glm[8] = rotation(0, 2);
-  glm[9] = rotation(1, 2);
-  glm[10] = rotation(2, 2);
-  glm[11] = 0.0;
-  glm[12] = position[0];
-  glm[13] = position[1];
-  glm[14] = position[2];
-  glm[15] = 1.0;
-  glMultMatrixd(glm);
+  glMultMatrixd(reinterpret_cast<GLdouble*>(transformation_matrix.data()));
 
-  glScalef(camera_scale, camera_scale, camera_scale);
-
-  // Draw Camera
+  // Draw Cameras.
   glColor3f(1.0, 0.0, 0.0);
+
+  // Create the camera wireframe. If intrinsic parameters are not set then use
+  // the focal length as a guess.
+  const float image_width =
+      (camera.ImageWidth() == 0) ? camera.FocalLength() : camera.ImageWidth();
+  const float image_height =
+      (camera.ImageHeight() == 0) ? camera.FocalLength() : camera.ImageHeight();
+  const float normalized_width = (image_width / 2.0) / camera.FocalLength();
+  const float normalized_height = (image_height / 2.0) / camera.FocalLength();
+
+  const Eigen::Vector3f top_left =
+      normalized_focal_length *
+      Eigen::Vector3f(-normalized_width, -normalized_height, 1);
+  const Eigen::Vector3f top_right =
+      normalized_focal_length *
+      Eigen::Vector3f(normalized_width, -normalized_height, 1);
+  const Eigen::Vector3f bottom_right =
+      normalized_focal_length *
+      Eigen::Vector3f(normalized_width, normalized_height, 1);
+  const Eigen::Vector3f bottom_left =
+      normalized_focal_length *
+      Eigen::Vector3f(-normalized_width, normalized_height, 1);
+
   glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
   glBegin(GL_TRIANGLE_FAN);
   glVertex3f(0.0, 0.0, 0.0);
-  glVertex3f(1.0, 1.0, 1.0);
-  glVertex3f(1.0, -1.0, 1.0);
-  glVertex3f(-1.0, -1.0, 1.0);
-  glVertex3f(-1.0, 1.0, 1.0);
-  glVertex3f(1.0, 1.0, 1.0);
+  glVertex3f(top_right[0], top_right[1], top_right[2]);
+  glVertex3f(top_left[0], top_left[1], top_left[2]);
+  glVertex3f(bottom_left[0], bottom_left[1], bottom_left[2]);
+  glVertex3f(bottom_right[0], bottom_right[1], bottom_right[2]);
+  glVertex3f(top_right[0], top_right[1], top_right[2]);
   glEnd();
   glPopMatrix();
 }
 
-void RenderScene() {
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+void DrawPoints(const float point_scale,
+                const float color_scale,
+                const float alpha_scale) {
+  const float default_point_size = point_size;
+  const float default_alpha_scale = anti_aliasing_blend;
 
-  glLoadIdentity();
-  glTranslatef(0.0f, 0.0f, -distance);
-  glRotatef(180.0f + rot_x, 1.0f, 0.0f, 0.0f);
-  glRotatef(-rot_y, 0.0f, 1.0f, 0.0f);
-  glTranslatef(-origin[0], -origin[1], -origin[2]);
-  glClearColor(1.0f, 1.0f, 1.0f, 0.0f);
+  // TODO(cmsweeney): Render points with the actual 3D point color! This would
+  // require Theia to save the colors during feature extraction.
+  const Eigen::Vector3f default_color(0.05, 0.05, 0.05);
 
-  // Plot the point cloud.
+  // Enable anti-aliasing for round points and alpha blending that helps make
+  // points look nicer.
+  glDisable(GL_LIGHTING);
   glEnable(GL_MULTISAMPLE);
   glEnable(GL_BLEND);
   glEnable(GL_POINT_SMOOTH);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  glPointParameterf(GL_POINT_SIZE_MIN, 0.0);
 
-  glPointSize(point_size);
-  glPointParameterf(GL_POINT_SIZE_MIN, 0.1f);
-  glPointParameterf(GL_POINT_SIZE_MAX, 8.0f);
-
-  // the coordinates for calculating point attenuation:
+  // The coordinates for calculating point attenuation. This allows for points
+  // to get smaller as the OpenGL camera moves farther away.
   GLfloat point_size_coords[3];
   point_size_coords[0] = 1.0f;
   point_size_coords[1] = 0.055f;
   point_size_coords[2] = 0.0f;
   glPointParameterfv(GL_POINT_DISTANCE_ATTENUATION, point_size_coords);
 
-  // Draw the points.
-  glColor3f(0.0, 0.0, 0.0);
+
+  glColor4f(color_scale * default_color[0],
+            color_scale * default_color[1],
+            color_scale * default_color[2],
+            alpha_scale * default_alpha_scale);
+
+  glPointSize(point_scale * default_point_size);
   glBegin(GL_POINTS);
   for (int i = 0; i < world_points.size(); i++) {
+    if (num_views_for_track[i] < min_num_views_for_track) {
+      continue;
+    }
     glVertex3d(world_points[i].x(), world_points[i].y(), world_points[i].z());
   }
+  glEnd();
+}
+
+void RenderScene() {
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+
+  // Transformation to the viewer origin.
+  glTranslatef(0.0, 0.0, zoom);
+  glRotatef(navigation_rotation[0], 1.0f, 0.0f, 0.0f);
+  glRotatef(navigation_rotation[1], 0.0f, 1.0f, 0.0f);
+  if (draw_axes) {
+    DrawAxes(10.0);
+  }
+
+  // Transformation from the viewer origin to the reconstruction origin.
+  glTranslatef(viewer_position[0], viewer_position[1], viewer_position[2]);
+
+  glClearColor(1.0f, 1.0f, 1.0f, 0.0f);
+
+  // Each 3D point is rendered 3 times with different point sizes, color
+  // intensity, and alpha blending. This allows for a more complete texture-like
+  // rendering of the 3D points. These values were found to experimentally
+  // produce nice visualizations on most scenes.
+  const float small_point_scale = 1.0, medium_point_scale = 5.0,
+              large_point_scale = 10.0;
+  const float small_color_scale = 1.0, medium_color_scale = 1.2,
+              large_color_scale = 1.5;
+  const float small_alpha_scale = 1.0, medium_alpha_scale = 2.1,
+              large_alpha_scale = 3.3;
+
+  DrawPoints(small_point_scale, small_color_scale, small_alpha_scale);
+  DrawPoints(medium_point_scale, medium_color_scale, medium_alpha_scale);
+  DrawPoints(large_point_scale, large_color_scale, large_alpha_scale);
 
   // Draw the cameras.
   if (draw_cameras) {
@@ -211,23 +275,26 @@ void RenderScene() {
       DrawCamera(cameras[i]);
     }
   }
-  glFlush();
+
   glutSwapBuffers();
 }
 
 void MouseButton(int button, int state, int x, int y) {
-  // button down: save coordinates
-  if (state == GLUT_DOWN && button <= 2) {
-    mouse_down_x[button] = x;
-    mouse_down_y[button] = y;
-    prev_x = x;
-    prev_y = y;
-    if (button == GLUT_LEFT_BUTTON) mouse_rotates = true;
-    return;
-  }
-
-  if (state == GLUT_UP && button == GLUT_LEFT_BUTTON) {
-    mouse_rotates = false;
+  // get the mouse buttons
+  if (button == GLUT_RIGHT_BUTTON) {
+    if (state == GLUT_DOWN) {
+      right_mouse_button_active += 1;
+    } else {
+      right_mouse_button_active -= 1;
+    }
+  } else if (button == GLUT_LEFT_BUTTON) {
+    if (state == GLUT_DOWN) {
+      left_mouse_button_active += 1;
+      last_x_offset = 0.0;
+      last_y_offset = 0.0;
+    } else {
+      left_mouse_button_active -= 1;
+    }
   }
 
   // scroll event - wheel reports as button 3 (scroll up) and button 4 (scroll
@@ -235,39 +302,74 @@ void MouseButton(int button, int state, int x, int y) {
   if ((button == 3) || (button == 4)) {
     // Each wheel event reports like a button click, GLUT_DOWN then GLUT_UP
     if (state == GLUT_UP) return;  // Disregard redundant GLUT_UP events
-    if (button == 3)
-      distance /= 1.5f;
-    else
-      distance *= 1.5f;
+    if (button == 3) {
+      zoom += delta_zoom;
+    } else {
+      zoom -= delta_zoom;
+    }
   }
+
+  mouse_pressed_x = x;
+  mouse_pressed_y = y;
 }
 
 void MouseMove(int x, int y) {
-  const double rotate_factor = 0.5f;
-  if (mouse_rotates) {
-    // notice x & y difference (i.e., changes in x are to rotate about y-axis)
-    rot_x -= rotate_factor * (y - prev_y);
-    rot_y -= rotate_factor * (x - prev_x);
-    prev_x = x;
-    prev_y = y;
+  float x_offset = 0.0, y_offset = 0.0;
+
+  // Rotation controls
+  if (right_mouse_button_active) {
+    navigation_rotation[0] += ((mouse_pressed_y - y) * 180.0f) / 200.0f;
+    navigation_rotation[1] += ((mouse_pressed_x - x) * 180.0f) / 200.0f;
+
+    mouse_pressed_y = y;
+    mouse_pressed_x = x;
+
+  } else if (left_mouse_button_active) {
+    float delta_x = 0, delta_y = 0;
+    const Eigen::AngleAxisf rotation(
+        Eigen::AngleAxisf(theia::DegToRad(navigation_rotation[0]),
+                          Eigen::Vector3f::UnitX()) *
+        Eigen::AngleAxisf(theia::DegToRad(navigation_rotation[1]),
+                          Eigen::Vector3f::UnitY()));
+
+    // Panning controls.
+    x_offset = (mouse_pressed_x - x);
+    if (last_x_offset != 0.0) {
+      delta_x = -(x_offset - last_x_offset) / 8.0;
+    }
+    last_x_offset = x_offset;
+
+    y_offset = (mouse_pressed_y - y);
+    if (last_y_offset != 0.0) {
+      delta_y = (y_offset - last_y_offset) / 8.0;
+    }
+    last_y_offset = y_offset;
+
+    // Compute the new viewer origin origin.
+    viewer_position +=
+        rotation.inverse() * Eigen::Vector3f(delta_x, delta_y, 0);
   }
 }
 
 void Keyboard(unsigned char key, int x, int y) {
   switch (key) {
     case 'r':  // reset viewpoint
-      distance = 100.0f;
-      rot_x = 0.0f;
-      rot_y = 0.0f;
+      viewer_position.setZero();
+      zoom = -50.0;
+      navigation_rotation.setZero();
+      mouse_pressed_x = 0;
+      mouse_pressed_y = 0;
+      last_x_offset = 0.0;
+      last_y_offset = 0.0;
+      left_mouse_button_active = 0;
+      right_mouse_button_active = 0;
       point_size = 1.0;
-
-      origin = Eigen::Vector3d::Zero();
-      break;
-    case 'a':
-      distance /= 1.2f;
       break;
     case 'z':
-      distance *= 1.2f;
+      zoom += delta_zoom;
+      break;
+    case 'Z':
+      zoom -= delta_zoom;
       break;
     case 'p':
       point_size /= 1.2;
@@ -276,44 +378,38 @@ void Keyboard(unsigned char key, int x, int y) {
       point_size *= 1.2;
       break;
     case 'f':
-      camera_scale /= 1.2;
+      normalized_focal_length /= 1.2;
       break;
     case 'F':
-      camera_scale *= 1.2;
-      break;
-    case 'u':
-      origin[0] += 10.0;
-      break;
-    case 'U':
-      origin[0] -= 10.0;
-      break;
-    case 'i':
-      origin[2] += 10.0;
-      break;
-    case 'I':
-      origin[2] -= 10.0;
+      normalized_focal_length *= 1.2;
       break;
     case 'c':
       draw_cameras = !draw_cameras;
       break;
+    case 'a':
+      draw_axes = !draw_axes;
+      break;
+    case 't':
+      ++min_num_views_for_track;
+      break;
+    case 'T':
+      --min_num_views_for_track;
+      break;
+    case 'b':
+      if (anti_aliasing_blend > 0) {
+        anti_aliasing_blend -= 0.01;
+      }
+      break;
+    case 'B':
+      if (anti_aliasing_blend < 1.0) {
+        anti_aliasing_blend += 0.01;
+      }
+      break;
   }
 }
 
-// initialize viewport etc.
-void Init() {
-  glMatrixMode(GL_PROJECTION);
-
-  glLoadIdentity();
-
-  double aspect_ratio, fovy;  // set the correct perspective.
-  GetPerspectiveParams(&aspect_ratio, &fovy);
-  gluPerspective(fovy, 1.0, .01, 100000.0);
-
-  glMatrixMode(GL_MODELVIEW);
-}
-
 int main(int argc, char* argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  THEIA_GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
 
   // Output as a binary file.
@@ -322,15 +418,8 @@ int main(int argc, char* argv[]) {
   CHECK(ReadReconstruction(FLAGS_reconstruction, reconstruction.get()))
       << "Could not read reconstruction file.";
 
-  // Set up world points.
-  world_points.reserve(reconstruction->NumTracks());
-  for (const theia::TrackId track_id : reconstruction->TrackIds()) {
-    const auto* track = reconstruction->Track(track_id);
-    if (track == nullptr || !track->IsEstimated()) {
-      continue;
-    }
-    world_points.emplace_back(track->Point().hnormalized());
-  }
+  // Centers the reconstruction based on the absolute deviation of 3D points.
+  reconstruction->Normalize();
 
   // Set up camera drawing.
   cameras.reserve(reconstruction->NumViews());
@@ -342,6 +431,17 @@ int main(int argc, char* argv[]) {
     cameras.emplace_back(view->Camera());
   }
 
+  // Set up world points.
+  world_points.reserve(reconstruction->NumTracks());
+  for (const theia::TrackId track_id : reconstruction->TrackIds()) {
+    const auto* track = reconstruction->Track(track_id);
+    if (track == nullptr || !track->IsEstimated()) {
+      continue;
+    }
+    world_points.emplace_back(track->Point().hnormalized());
+    num_views_for_track.emplace_back(track->NumViews());
+  }
+
   reconstruction.release();
 
   // Set up opengl and glut.
@@ -349,7 +449,7 @@ int main(int argc, char* argv[]) {
   glutInitWindowPosition(600, 600);
   glutInitWindowSize(1200, 800);
   glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
-  glutCreateWindow("Bundler Reconstruction Viewer");
+  glutCreateWindow("Theia Reconstruction Viewer");
 
   // Set the camera
   gluLookAt(0.0f, 0.0f, -6.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);

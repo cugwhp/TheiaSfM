@@ -55,13 +55,11 @@ bool Triangulate(const Matrix3x4d& pose1,
                  const Eigen::Vector2d& point2,
                  Eigen::Vector4d* triangulated_point);
 
-// Triangulates a 3D point by determining the closest point between the two
+// Triangulates a 3D point by determining the closest point between the
 // rays. This method is known to be suboptimal in terms of reprojection error
 // but it is extremely fast. We assume that the directions are unit vectors.
-bool TriangulateMidpoint(const Eigen::Vector3d& origin1,
-                         const Eigen::Vector3d& ray_direction1,
-                         const Eigen::Vector3d& origin2,
-                         const Eigen::Vector3d& ray_direction2,
+bool TriangulateMidpoint(const std::vector<Eigen::Vector3d>& origins,
+                         const std::vector<Eigen::Vector3d>& ray_directions,
                          Eigen::Vector4d* triangulated_point);
 
 // Triangulates 2 posed views using the DLT method from HZZ 12.2 p 312. The
@@ -97,6 +95,12 @@ bool IsTriangulatedPointInFrontOfCameras(
     const FeatureCorrespondence& correspondence,
     const Eigen::Matrix3d& rotation,
     const Eigen::Vector3d& position);
+
+// Returns true if the triangulation angle between any two observations is
+// sufficient.
+bool SufficientTriangulationAngle(
+    const std::vector<Eigen::Vector3d>& ray_directions,
+    const double min_triangulation_angle_degrees);
 
 }  // namespace theia
 
