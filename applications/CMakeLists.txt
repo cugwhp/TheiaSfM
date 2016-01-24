@@ -30,6 +30,9 @@ TARGET_LINK_LIBRARIES(view_reconstruction theia ${GFLAGS_LIBRARIES}
 ADD_EXECUTABLE(compute_reconstruction_statistics compute_reconstruction_statistics.cc)
 TARGET_LINK_LIBRARIES(compute_reconstruction_statistics theia ${GFLAGS_LIBRARIES} ${GLOG_LIBRARIES})
 
+ADD_EXECUTABLE(colorize_reconstruction colorize_reconstruction.cc)
+TARGET_LINK_LIBRARIES(colorize_reconstruction theia ${GFLAGS_LIBRARIES} ${GLOG_LIBRARIES})
+
 ADD_EXECUTABLE(compare_reconstructions compare_reconstructions.cc)
 TARGET_LINK_LIBRARIES(compare_reconstructions theia ${GFLAGS_LIBRARIES} ${GLOG_LIBRARIES})
 
@@ -48,6 +51,9 @@ TARGET_LINK_LIBRARIES(convert_sift_key_file theia ${GFLAGS_LIBRARIES} ${GLOG_LIB
 
 ADD_EXECUTABLE(convert_bundle_file convert_bundle_file.cc)
 TARGET_LINK_LIBRARIES(convert_bundle_file theia ${GFLAGS_LIBRARIES} ${GLOG_LIBRARIES})
+
+ADD_EXECUTABLE(convert_nvm_file convert_nvm_file.cc)
+TARGET_LINK_LIBRARIES(convert_nvm_file theia ${GFLAGS_LIBRARIES} ${GLOG_LIBRARIES})
 
 ADD_EXECUTABLE(convert_theia_reconstruction_to_bundler_file convert_theia_reconstruction_to_bundler_file.cc)
 TARGET_LINK_LIBRARIES(convert_theia_reconstruction_to_bundler_file theia ${GFLAGS_LIBRARIES} ${GLOG_LIBRARIES})

@@ -42,6 +42,7 @@ set(THEIA_SRC
   image/descriptor/sift_descriptor.cc
   image/image_canvas.cc
   image/keypoint_detector/sift_detector.cc
+  io/import_nvm_file.cc
   io/read_1dsfm.cc
   io/read_bundler_files.cc
   io/read_calibration.cc
@@ -76,13 +77,16 @@ set(THEIA_SRC
   sfm/camera/camera.cc
   sfm/camera/projection_matrix_utils.cc
   sfm/camera/radial_distortion.cc
+  sfm/colorize_reconstruction.cc
   sfm/estimate_track.cc
   sfm/estimate_twoview_info.cc
   sfm/estimators/estimate_calibrated_absolute_pose.cc
+  sfm/estimators/estimate_dominant_plane_from_points.cc
   sfm/estimators/estimate_essential_matrix.cc
   sfm/estimators/estimate_fundamental_matrix.cc
   sfm/estimators/estimate_homography.cc
   sfm/estimators/estimate_relative_pose.cc
+  sfm/estimators/estimate_similarity_transformation_2d_3d.cc
   sfm/estimators/estimate_triangulation.cc
   sfm/estimators/estimate_uncalibrated_absolute_pose.cc
   sfm/estimators/estimate_uncalibrated_relative_pose.cc
@@ -161,7 +165,8 @@ set(THEIA_LIBRARY_DEPENDENCIES
   easyexif
   statx
   stlplus3
-  vlfeat)
+  vlfeat
+  visual_sfm)
 
 set(THEIA_LIBRARY_SOURCE
   ${THEIA_SRC}
@@ -216,10 +221,12 @@ if (BUILD_TESTING)
   gtest(sfm/camera/projection_matrix_utils)
   gtest(sfm/camera/radial_distortion)
   gtest(sfm/estimators/estimate_calibrated_absolute_pose)
+  gtest(sfm/estimators/estimate_dominant_plane_from_points)
   gtest(sfm/estimators/estimate_essential_matrix)
   gtest(sfm/estimators/estimate_fundamental_matrix)
   gtest(sfm/estimators/estimate_homography)
   gtest(sfm/estimators/estimate_relative_pose)
+  gtest(sfm/estimators/estimate_similarity_transformation_2d_3d)
   gtest(sfm/estimators/estimate_triangulation)
   gtest(sfm/estimators/estimate_uncalibrated_absolute_pose)
   gtest(sfm/estimators/estimate_uncalibrated_relative_pose)
